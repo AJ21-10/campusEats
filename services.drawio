@@ -1,0 +1,61 @@
+<mxfile host="app.diagrams.net" agent="ChatGPT">
+  <diagram id="campuseats-services" name="CampusEats Services">
+    <mxGraphModel dx="808" dy="447" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=26;fontStyle=1;fontColor=#1F2937" value="CampusEats — Service Architecture" vertex="1">
+          <mxGeometry height="45" width="740" x="430" y="25" as="geometry" />
+        </mxCell>
+        <mxCell id="client" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3F4F6;strokeColor=#6B7280;strokeWidth=2;fontSize=13" value="&lt;b&gt;CampusEats Client&lt;/b&gt;&lt;br&gt;Web / Mobile" vertex="1">
+          <mxGeometry height="75" width="420" x="590" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="accounts" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F1FB;strokeColor=#2563EB;strokeWidth=2;align=left;verticalAlign=top;spacingTop=10;spacingLeft=12;fontSize=13" value="&lt;b&gt;ACCOUNTS SERVICE&lt;/b&gt;&lt;br&gt;Owner: Anurag Panda&lt;hr&gt;&lt;b&gt;Owns&lt;/b&gt;&lt;br&gt;users&lt;br&gt;profiles&lt;br&gt;campuses&lt;br&gt;campus_locations&lt;br&gt;pickup_points&lt;hr&gt;&lt;b&gt;Contracts&lt;/b&gt;&lt;br&gt;getProfile&lt;br&gt;getLocation&lt;br&gt;updateProfile" vertex="1">
+          <mxGeometry height="290" width="330" x="60" y="245" as="geometry" />
+        </mxCell>
+        <mxCell id="catalogue" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEF7EA;strokeColor=#16A34A;strokeWidth=2;align=left;verticalAlign=top;spacingTop=10;spacingLeft=12;fontSize=13" value="&lt;b&gt;CATALOGUE SERVICE&lt;/b&gt;&lt;br&gt;Owner: Dinesh Kushwaha&lt;hr&gt;&lt;b&gt;Owns&lt;/b&gt;&lt;br&gt;restaurants&lt;br&gt;menus&lt;br&gt;categories&lt;br&gt;menu_items&lt;br&gt;restaurant_hours&lt;hr&gt;&lt;b&gt;Contracts&lt;/b&gt;&lt;br&gt;listRestaurants&lt;br&gt;getMenu&lt;br&gt;checkItem&lt;br&gt;checkRestaurant" vertex="1">
+          <mxGeometry height="290" width="330" x="60" y="595" as="geometry" />
+        </mxCell>
+        <mxCell id="orders" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF4DD;strokeColor=#D97706;strokeWidth=3;align=left;verticalAlign=top;spacingTop=10;spacingLeft=12;fontSize=13" value="&lt;b&gt;ORDERS SERVICE&lt;/b&gt;&lt;br&gt;Owner: Taj Ansari | Core orchestration&lt;hr&gt;&lt;b&gt;Owns&lt;/b&gt;&lt;br&gt;carts&lt;br&gt;cart_items&lt;br&gt;orders&lt;br&gt;order_items&lt;br&gt;group_orders&lt;br&gt;group_members&lt;hr&gt;&lt;b&gt;Contracts&lt;/b&gt;&lt;br&gt;addToCart&lt;br&gt;placeOrder&lt;br&gt;getOrder&lt;br&gt;cancelOrder" vertex="1">
+          <mxGeometry height="330" width="350" x="635" y="325" as="geometry" />
+        </mxCell>
+        <mxCell id="payments" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F4ECFA;strokeColor=#9333EA;strokeWidth=2;align=left;verticalAlign=top;spacingTop=10;spacingLeft=12;fontSize=13" value="&lt;b&gt;PAYMENTS SERVICE&lt;/b&gt;&lt;br&gt;Owner: Taj Ansari&lt;hr&gt;&lt;b&gt;Owns&lt;/b&gt;&lt;br&gt;payment_methods&lt;br&gt;payments&lt;br&gt;transactions&lt;br&gt;refunds&lt;hr&gt;&lt;b&gt;Contracts&lt;/b&gt;&lt;br&gt;charge&lt;br&gt;getPaymentStatus&lt;br&gt;refund" vertex="1">
+          <mxGeometry height="290" width="330" x="1230" y="245" as="geometry" />
+        </mxCell>
+        <mxCell id="delivery" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EAF7F7;strokeColor=#0891B2;strokeWidth=2;align=left;verticalAlign=top;spacingTop=10;spacingLeft=12;fontSize=13" value="&lt;b&gt;DELIVERY SERVICE&lt;/b&gt;&lt;br&gt;Owner: Puspender&lt;hr&gt;&lt;b&gt;Owns&lt;/b&gt;&lt;br&gt;fulfilments&lt;br&gt;delivery_assignments&lt;hr&gt;&lt;b&gt;Contracts&lt;/b&gt;&lt;br&gt;createFulfilment&lt;br&gt;assignDelivery&lt;br&gt;getFulfilmentStatus" vertex="1">
+          <mxGeometry height="270" width="330" x="1230" y="595" as="geometry" />
+        </mxCell>
+        <mxCell id="engagement" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCECEC;strokeColor=#DC2626;strokeWidth=2;align=left;verticalAlign=top;spacingTop=10;spacingLeft=12;fontSize=13" value="&lt;b&gt;CAMPUS ENGAGEMENT SERVICE&lt;/b&gt;&lt;br&gt;Owner: Rohit | Reviews + notifications&lt;hr&gt;&lt;b&gt;Owns&lt;/b&gt;&lt;br&gt;notifications&lt;br&gt;restaurant_reviews&lt;br&gt;item_reviews&lt;hr&gt;&lt;b&gt;Contracts&lt;/b&gt;&lt;br&gt;sendNotification&lt;br&gt;getCompletedOrder&lt;br&gt;createReview" vertex="1">
+          <mxGeometry height="245" width="350" x="635" y="720" as="geometry" />
+        </mxCell>
+        <mxCell id="c1" edge="1" parent="1" source="client" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#111827;strokeWidth=2;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#FFFFFF" target="orders" value="HTTPS / REST / JSON&lt;br&gt;placeOrder, getOrder">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="c2" edge="1" parent="1" source="client" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6B7280;strokeWidth=1.5;dashed=1;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#FFFFFF" target="catalogue" value="HTTPS / REST / JSON&lt;br&gt;listRestaurants, getMenu">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a1" edge="1" parent="1" source="orders" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#374151;strokeWidth=2;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#FFFFFF" target="accounts" value="HTTPS / REST / JSON&lt;br&gt;&lt;b&gt;getLocation&lt;/b&gt;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a2" edge="1" parent="1" source="orders" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#374151;strokeWidth=2;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#FFFFFF" target="catalogue" value="HTTPS / REST / JSON&lt;br&gt;&lt;b&gt;checkItem&lt;/b&gt;, checkRestaurant">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a3" edge="1" parent="1" source="orders" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#374151;strokeWidth=2;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#FFFFFF" target="payments" value="HTTPS / REST / JSON&lt;br&gt;&lt;b&gt;charge&lt;/b&gt;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a4" edge="1" parent="1" source="orders" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#374151;strokeWidth=2;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#FFFFFF" target="delivery" value="HTTPS / REST / JSON&lt;br&gt;&lt;b&gt;createFulfilment&lt;/b&gt;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a5" edge="1" parent="1" source="orders" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#374151;strokeWidth=2;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#FFFFFF" target="engagement" value="HTTPS / REST / JSON&lt;br&gt;&lt;b&gt;sendNotification&lt;/b&gt;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a6" edge="1" parent="1" source="engagement" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6B7280;strokeWidth=2;dashed=1;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#FFFFFF" target="orders" value="HTTPS / REST / JSON&lt;br&gt;&lt;b&gt;getCompletedOrder&lt;/b&gt;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="legend" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9CA3AF;fontSize=11;align=left;verticalAlign=top;spacingTop=8;spacingLeft=10" value="&lt;b&gt;Legend&lt;/b&gt;&lt;br&gt;Solid arrow = service/API call&lt;br&gt;Dashed arrow = supporting/read operation&lt;br&gt;Protocol = HTTPS + REST + JSON&lt;br&gt;&lt;b&gt;Boundary rule:&lt;/b&gt; each service owns its data; no service directly accesses another service&#39;s database." vertex="1">
+          <mxGeometry height="130" width="490" x="60" y="910" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
