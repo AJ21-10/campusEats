@@ -1,10 +1,11 @@
 # CampusEats
+
 Team 15 :
-Team Lead : Anurag Panda
-Members :   i) Taj Ansari
-            ii) Dinesh Kushwaha
-            iii)Rohit
-            iv) Pushpender
+Team Lead : Anurag Panda 20251651026
+Members : i) Taj Ansari 20251651095
+ii) Dinesh Kushwaha 20251651035
+iii)Rohit 20251651079
+iv) Pushpender 20251651074
 
 CampusEats is a campus-focused food discovery and ordering platform designed specifically for students, food vendors, delivery staff, and campus administrators.
 
@@ -24,46 +25,46 @@ The system is designed specifically for campus environments rather than as a gen
 
 ### Student Features
 
-* User registration and login
-* Profile and campus location management
-* Restaurant discovery
-* Menu browsing
-* Food availability checking
-* Cart management
-* Immediate ordering
-* Scheduled ordering
-* Group ordering
-* Pickup and campus delivery
-* Order tracking
-* Notifications
-* Ratings and reviews
-* Order history
+- User registration and login
+- Profile and campus location management
+- Restaurant discovery
+- Menu browsing
+- Food availability checking
+- Cart management
+- Immediate ordering
+- Scheduled ordering
+- Group ordering
+- Pickup and campus delivery
+- Order tracking
+- Notifications
+- Ratings and reviews
+- Order history
 
 ### Vendor Features
 
-* Restaurant management
-* Menu management
-* Price management
-* Food availability management
-* Operating hours
-* Order management
-* Preparation status updates
+- Restaurant management
+- Menu management
+- Price management
+- Food availability management
+- Operating hours
+- Order management
+- Preparation status updates
 
 ### Delivery Features
 
-* Delivery assignment
-* Delivery status updates
-* Campus delivery tracking
-* Pickup and delivery confirmation
+- Delivery assignment
+- Delivery status updates
+- Campus delivery tracking
+- Pickup and delivery confirmation
 
 ### Administration Features
 
-* User management
-* Vendor management
-* Restaurant approval
-* Campus location management
-* Order monitoring
-* System reports
+- User management
+- Vendor management
+- Restaurant approval
+- Campus location management
+- Order monitoring
+- System reports
 
 ## What Makes This Project Different?
 
@@ -71,13 +72,13 @@ The project takes the basic CampusEats concept discussed in the course material 
 
 The major additions planned for this implementation are:
 
-* Scheduled food orders
-* Group orders
-* Campus-specific pickup points
-* Food-item availability management
-* Restaurant and food-item ratings
-* Campus-specific delivery
-* Vendor operating hours
+- Scheduled food orders
+- Group orders
+- Campus-specific pickup points
+- Food-item availability management
+- Restaurant and food-item ratings
+- Campus-specific delivery
+- Vendor operating hours
 
 These features will allow the project to be developed beyond the basic restaurant → cart → order → payment → delivery flow.
 
@@ -153,51 +154,51 @@ campuseats/
 
 ### Phase 1 — Web and HTTP Fundamentals
 
-* HTTP requests and responses
-* HTTP methods
-* Status codes
-* Headers
-* JSON
-* REST-style APIs
-* Browser Network analysis
+- HTTP requests and responses
+- HTTP methods
+- Status codes
+- Headers
+- JSON
+- REST-style APIs
+- Browser Network analysis
 
 ### Phase 2 — Core CampusEats
 
-* User accounts
-* Restaurants
-* Menus
-* Cart
-* Orders
-* Payment workflow
-* Pickup and delivery
+- User accounts
+- Restaurants
+- Menus
+- Cart
+- Orders
+- Payment workflow
+- Pickup and delivery
 
 ### Phase 3 — Campus-Specific Features
 
-* Scheduled orders
-* Group orders
-* Pickup points
-* Restaurant operating hours
-* Item availability
-* Ratings and reviews
+- Scheduled orders
+- Group orders
+- Pickup points
+- Restaurant operating hours
+- Item availability
+- Ratings and reviews
 
 ### Phase 4 — Web Services
 
-* Define service boundaries
-* Define API contracts
-* Separate data ownership
-* Implement inter-service communication
-* Handle service errors
-* Maintain loose coupling
+- Define service boundaries
+- Define API contracts
+- Separate data ownership
+- Implement inter-service communication
+- Handle service errors
+- Maintain loose coupling
 
 ### Phase 5 — Deployment and Improvement
 
-* Testing
-* Authentication and authorization
-* Logging
-* Error handling
-* API documentation
-* Deployment
-* Performance improvements
+- Testing
+- Authentication and authorization
+- Logging
+- Error handling
+- API documentation
+- Deployment
+- Performance improvements
 
 ## Course
 
