@@ -3,15 +3,15 @@
 Web servies Project
 
 Team 15 :
-Team lead : Anurag Panda
-Members : i)Rohit
-ii)Dinesh kushwwaha
-iii)Puspender
-iv) Taj Ansari
+Team Lead : Anurag Panda
+Members : i) Taj Ansari
+ii) Dinesh Kushwaha
+iii)Rohit
+iv) Pushpender
 
 🍽️ Campus Eats
 
-Campus Eats is a food ordering and delivery platform designed exclusively for college and university campuses. It connects students, faculty, and staff with on-campus canteens, cafeterias, and local food vendors — making it easy to browse menus, place orders, pay online, and track deliveries, all in one place.
+    Campus Eats is a food ordering and delivery platform designed exclusively for college and university campuses. It connects students, faculty, and staff with on-campus canteens, cafeterias, and local food vendors — making it easy to browse menus, place orders, pay online, and track deliveries, all in one place.
 
 📌 Table of Contents
 About the Project
@@ -55,6 +55,7 @@ Faculty/Staff Secondary users ordering during work hours
 Vendors/Canteens Manage menus and fulfill orders
 Delivery Staff Deliver orders across campus
 Admin Manages platform, vendors, and disputes
+
 ⚙️ System Overview
 
 Campus Eats connects three main actors — customers, vendors, and delivery agents — through a central platform:
