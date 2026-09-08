@@ -1,0 +1,208 @@
+openapi: 3.0.3
+info:
+  title: CampusEats Delivery Service
+  version: 1.0.0
+  description: Service for creating and tracking campus deliveries.
+servers:
+  - url: http://localhost:5000
+paths:
+  /deliveries:
+    post:
+      summary: Create a delivery
+      operationId: createDelivery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDeliveryRequest"
+      responses:
+        "201":
+          description: Delivery created
+          headers:
+            Location:
+              description: Delivery resource URL
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Delivery"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflicting delivery state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Request is valid but rejected by domain rules
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema:
+            type: string
+    get:
+      summary: List deliveries
+      operationId: listDeliveries
+      parameters:
+        - in: query
+          name: order_id
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of deliveries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Delivery"
+        "400":
+          description: Bad query parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /deliveries/{delivery_id}:
+    get:
+      summary: Get a delivery by ID
+      operationId: getDelivery
+      parameters:
+        - in: path
+          name: delivery_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Delivery found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Delivery"
+        "404":
+          description: Delivery not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /deliveries/{delivery_id}/status:
+    put:
+      summary: Update delivery status
+      operationId: updateDeliveryStatus
+      parameters:
+        - in: path
+          name: delivery_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDeliveryStatusRequest"
+      responses:
+        "202":
+          description: Status update accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Delivery"
+        "404":
+          description: Delivery not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: State conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Domain rejected the status transition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+components:
+  schemas:
+    Error:
+      type: object
+      required: [type, title, status, detail]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+    CreateDeliveryRequest:
+      type: object
+      required: [order_id, student_id, pickup_location, dropoff_location]
+      properties:
+        order_id:
+          type: string
+        student_id:
+          type: string
+        pickup_location:
+          type: string
+        dropoff_location:
+          type: string
+    UpdateDeliveryStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [assigned, picked_up, delivered]
+    Delivery:
+      type: object
+      required:
+        [
+          delivery_id,
+          order_id,
+          student_id,
+          pickup_location,
+          dropoff_location,
+          status,
+          payment_verified,
+        ]
+      properties:
+        delivery_id:
+          type: string
+        order_id:
+          type: string
+        student_id:
+          type: string
+        pickup_location:
+          type: string
+        dropoff_location:
+          type: string
+        status:
+          type: string
+        payment_verified:
+          type: boolean

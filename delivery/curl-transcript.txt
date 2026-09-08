@@ -1,0 +1,42 @@
+$ curl -i -X POST http://localhost:5000/deliveries \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: transcript-key-1' \
+  -d '{"order_id":"ORD-4501","student_id":"STU-4501","pickup_location":"Library Gate","dropoff_location":"Hostel A"}'
+HTTP/1.1 201 CREATED
+Location: /deliveries/DEL-0001
+Content-Type: application/json
+
+{"delivery_id":"DEL-0001","order_id":"ORD-4501","student_id":"STU-4501","pickup_location":"Library Gate","dropoff_location":"Hostel A","status":"assigned","payment_verified":false}
+
+$ curl -i -X POST http://localhost:5000/deliveries \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: transcript-key-1' \
+  -d '{"order_id":"ORD-4501","student_id":"STU-4501","pickup_location":"Library Gate","dropoff_location":"Hostel A"}'
+HTTP/1.1 201 CREATED
+Location: /deliveries/DEL-0001
+Content-Type: application/json
+
+{"delivery_id":"DEL-0001","order_id":"ORD-4501","student_id":"STU-4501","pickup_location":"Library Gate","dropoff_location":"Hostel A","status":"assigned","payment_verified":false}
+
+$ curl -i -X POST http://localhost:5000/deliveries \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: bad-key' \
+  -d '{"order_id":"ORD-4502","student_id":"STU-4502","pickup_location":"X"}'
+HTTP/1.1 400 BAD REQUEST
+Content-Type: application/json
+
+{"type":"invalid-request","title":"Invalid request","status":400,"detail":"Missing required field: dropoff_location"}
+
+$ curl -i http://localhost:5000/deliveries/DEL-9999
+HTTP/1.1 404 NOT FOUND
+Content-Type: application/json
+
+{"type":"not-found","title":"Not found","status":404,"detail":"Delivery DEL-9999 not found"}
+
+$ curl -i -X PUT http://localhost:5000/deliveries/DEL-0001/status \
+  -H 'Content-Type: application/json' \
+  -d '{"status":"delivered"}'
+HTTP/1.1 202 ACCEPTED
+Content-Type: application/json
+
+{"delivery_id":"DEL-0001","order_id":"ORD-4501","student_id":"STU-4501","pickup_location":"Library Gate","dropoff_location":"Hostel A","status":"delivered","payment_verified":false}
