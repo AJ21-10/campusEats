@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CampusEats | Home</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body data-page="home">
+    <nav class="top-nav">
+      <div class="nav-brand">CampusEats</div>
+      <div class="nav-links">
+        <a href="catalog.html">Catalogue</a>
+        <a href="restaurant.html">Restaurants</a>
+        <a href="cart.html">Cart</a>
+        <a href="orders.html">Orders</a>
+        <a href="login.html">Login</a>
+      </div>
+      <div class="nav-user" id="navUser">Guest</div>
+    </nav>
+
+    <main class="page-shell">
+      <section class="hero panel">
+        <div>
+          <p class="eyebrow">Smart campus food ordering</p>
+          <h1>Campus food, faster and simpler.</h1>
+          <p class="hero-copy">
+            Discover restaurants, browse menus, add items to cart, place orders, and track your campus delivery or pickup in one place.
+          </p>
+          <div class="cta-row">
+            <a class="primary-btn" href="catalog.html">Browse restaurants</a>
+            <a class="secondary-btn" href="login.html">Login</a>
+          </div>
+        </div>
+        <div class="hero-card">
+          <div class="stat-box">
+            <strong id="heroUserName">Guest</strong>
+            <span>Current user</span>
+          </div>
+          <div class="stat-box">
+            <strong id="heroCartCount">0</strong>
+            <span>Items in cart</span>
+          </div>
+          <div class="stat-box">
+            <strong>24/7</strong>
+            <span>Campus access</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="feature-grid">
+        <article class="panel feature-card">
+          <h3>Catalogue</h3>
+          <p>Search restaurants by campus and browse the available menu in a few clicks.</p>
+        </article>
+        <article class="panel feature-card">
+          <h3>Cart</h3>
+          <p>Build a custom order and checkout with pickup or delivery fulfilment.</p>
+        </article>
+        <article class="panel feature-card">
+          <h3>Orders</h3>
+          <p>Track recent orders, payment status, and updates from one dashboard.</p>
+        </article>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

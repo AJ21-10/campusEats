@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CampusEats | Cart</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body data-page="cart">
+    <nav class="top-nav">
+      <div class="nav-brand">CampusEats</div>
+      <div class="nav-links">
+        <a href="index.html">Home</a>
+        <a href="catalog.html">Catalogue</a>
+        <a href="orders.html">Orders</a>
+      </div>
+      <div class="nav-user" id="navUser">Guest</div>
+    </nav>
+
+    <main class="page-shell narrow-shell">
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Your cart</h2>
+        </div>
+
+        <div id="cartItems" class="cart-list"></div>
+        <div class="checkout-box">
+          <div class="totals-row">
+            <span>Subtotal</span>
+            <strong id="cartSubtotal">₹0.00</strong>
+          </div>
+          <div class="totals-row">
+            <span>Delivery</span>
+            <strong>₹0.00</strong>
+          </div>
+          <div class="totals-row total-line">
+            <span>Total</span>
+            <strong id="cartTotal">₹0.00</strong>
+          </div>
+        </div>
+
+        <form id="checkoutForm" class="stacked-form">
+          <label>
+            <span>Fulfilment type</span>
+            <select id="fulfilmentType">
+              <option value="PICKUP">Pickup</option>
+              <option value="DELIVERY">Delivery</option>
+            </select>
+          </label>
+          <label>
+            <span>Payment method ID</span>
+            <input id="paymentMethodId" type="number" min="1" value="1" />
+          </label>
+          <button type="submit">Place order</button>
+        </form>
+
+        <div id="cartStatus" class="status-box info">Cart is empty.</div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

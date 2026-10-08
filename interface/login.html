@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CampusEats | Login</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body data-page="login">
+    <nav class="top-nav">
+      <div class="nav-brand">CampusEats</div>
+      <div class="nav-links">
+        <a href="index.html">Home</a>
+        <a href="catalog.html">Catalogue</a>
+        <a href="cart.html">Cart</a>
+        <a href="orders.html">Orders</a>
+      </div>
+      <div class="nav-user" id="navUser">Guest</div>
+    </nav>
+
+    <main class="page-shell narrow-shell">
+      <section class="panel auth-card">
+        <div class="panel-header">
+          <h2>Welcome back</h2>
+        </div>
+
+        <form id="loginForm" class="stacked-form">
+          <label>
+            <span>Email</span>
+            <input type="email" name="email" value="student@campuseats.test" required />
+          </label>
+          <label>
+            <span>Password</span>
+            <input type="password" name="password" value="Password123" required />
+          </label>
+          <button type="submit">Login</button>
+        </form>
+
+        <div class="muted-note">
+          Demo account: student@campuseats.test / Password123
+        </div>
+        <div id="loginStatus" class="status-box info">Ready.</div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

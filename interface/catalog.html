@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CampusEats | Catalogue</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body data-page="catalog">
+    <nav class="top-nav">
+      <div class="nav-brand">CampusEats</div>
+      <div class="nav-links">
+        <a href="index.html">Home</a>
+        <a href="login.html">Login</a>
+        <a href="cart.html">Cart</a>
+        <a href="orders.html">Orders</a>
+      </div>
+      <div class="nav-user" id="navUser">Guest</div>
+    </nav>
+
+    <main class="page-shell">
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Restaurant catalogue</h2>
+        </div>
+
+        <div class="toolbar">
+          <input id="restaurantSearch" type="search" placeholder="Search restaurants" />
+          <button id="refreshCatalogBtn" class="secondary-btn">Refresh list</button>
+        </div>
+
+        <div id="catalogStatus" class="status-box info">Loading restaurants…</div>
+        <div id="restaurantCards" class="restaurant-grid"></div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
