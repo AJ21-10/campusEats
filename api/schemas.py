@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field, StrictInt, StrictStr, model_validator
 
 
 class ProfileInput(BaseModel):
@@ -14,6 +14,11 @@ class RegisterInput(ProfileInput):
     email: str
     password: str = Field(min_length=8)
     role: Literal["STUDENT", "VENDOR", "DELIVERY_STAFF", "ADMIN"] = "STUDENT"
+
+
+class LoginInput(BaseModel):
+    email: str
+    password: str
 
 
 class LocationInput(BaseModel):
@@ -49,18 +54,28 @@ class CartItemInput(BaseModel):
 
 
 class OrderItemInput(BaseModel):
-    item_id: int
-    quantity: int = Field(gt=0)
+    item_id: StrictInt = Field(gt=0)
+    quantity: StrictInt = Field(
+        gt=0,
+        validation_alias=AliasChoices("qty", "quantity"),
+    )
 
 
 class OrderInput(BaseModel):
-    user_id: int
-    items: list[OrderItemInput] = Field(min_length=1)
-    location_id: int | None = None
-    payment_method_id: int
+    user_id: StrictInt = Field(gt=0)
+    items: list[OrderItemInput]
+    location_id: StrictInt | None = Field(default=None, gt=0)
+    address: StrictStr = Field(min_length=1)
+    payment_method_id: StrictInt = Field(gt=0)
     fulfilment_type: Literal["PICKUP", "DELIVERY"]
     scheduled_at: datetime | None = None
-    idempotency_key: str = Field(min_length=1, max_length=100)
+    idempotency_key: StrictStr | None = Field(default=None, min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def require_non_empty_address(self):
+        if not self.address.strip():
+            raise ValueError("address must not be empty")
+        return self
 
 class OrderStatusInput(BaseModel):
     status: Literal[

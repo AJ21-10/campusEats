@@ -2,23 +2,80 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import hashlib
 import json
+import logging
 import os
 import time
+from xml.etree.ElementTree import Element, SubElement, tostring
 
-from fastapi import APIRouter, FastAPI, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from passlib.context import CryptContext
+import psycopg
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from api.db import check_connection, fetch_all, fetch_one, transaction
 from api.schemas import (
-    AssignmentInput, CartItemInput, FulfilmentInput, ItemInput, LocationInput,
+    AssignmentInput, CartItemInput, FulfilmentInput, ItemInput, LocationInput, LoginInput,
     MenuInput, NotificationInput, OrderInput, PaymentInput, ProfileInput,
     RefundInput, RegisterInput, RestaurantInput, ReviewInput, OrderStatusInput, row_dict,
 )
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+logger = logging.getLogger(__name__)
+
+
+class ApiProblem(Exception):
+    def __init__(
+        self,
+        type_: str,
+        title: str,
+        status_code: int,
+        detail: str,
+        *,
+        errors: list[dict[str, str]] | None = None,
+        headers: dict[str, str] | None = None,
+    ):
+        super().__init__(detail)
+        self.type = type_
+        self.title = title
+        self.status_code = status_code
+        self.detail = detail
+        self.errors = errors
+        self.headers = headers or {}
+
+
+def request_instance(request: Request | object) -> str:
+    url = getattr(request, "url", None)
+    if url is not None:
+        return str(getattr(url, "path", "/"))
+    return "/"
+
+
+def problem(type_: str, title: str, status_code: int, detail: str, *, instance: str | None = None, errors: list[dict[str, str]] | None = None):
+    payload = {
+        "type": type_,
+        "title": title,
+        "status": status_code,
+        "detail": detail,
+    }
+    if instance is not None:
+        payload["instance"] = instance
+    if errors is not None:
+        payload["errors"] = errors
+    response = JSONResponse(
+        payload,
+        status_code=status_code,
+        media_type="application/problem+json",
+    )
+    response.headers["Content-Type"] = "application/problem+json; charset=utf-8"
+    return response
+
+
+def raise_problem(type_: str, title: str, status_code: int, detail: str, *, errors: list[dict[str, str]] | None = None, headers: dict[str, str] | None = None):
+    raise ApiProblem(type_, title, status_code, detail, errors=errors, headers=headers)
 
 
 def missing(detail="Resource not found"):
@@ -64,9 +121,9 @@ def register(payload: RegisterInput):
 
 
 @accounts.post("/login")
-def login(email: str, password: str):
-    row = fetch_one("SELECT user_id,email,password_hash,role,status FROM accounts.users WHERE email=%s", (email,))
-    if not row or not pwd_context.verify(password, row[2]):
+def login(payload: LoginInput):
+    row = fetch_one("SELECT user_id,email,password_hash,role,status FROM accounts.users WHERE email=%s", (payload.email,))
+    if not row or not pwd_context.verify(payload.password, row[2]):
         raise HTTPException(401, "Invalid credentials")
     return row_dict(row, ["user_id", "email", "password_hash", "role", "status"]) | {"password_hash": None}
 
@@ -93,6 +150,13 @@ def add_location(user_id: int, payload: LocationInput):
     return row_dict(row, ["location_id", "user_id", "campus_id", "label", "building", "room", "is_default"])
 
 
+@accounts.get("/{user_id}/locations")
+def list_locations(user_id: int):
+    rows = fetch_all("""SELECT location_id,user_id,campus_id,label,building,room,is_default
+        FROM accounts.campus_locations WHERE user_id=%s ORDER BY is_default DESC,location_id""", (user_id,))
+    return [row_dict(row, ["location_id", "user_id", "campus_id", "label", "building", "room", "is_default"]) for row in rows]
+
+
 @accounts.get("/{user_id}/locations/{location_id}")
 def get_location(user_id: int, location_id: int):
     row = fetch_one("SELECT location_id,user_id,campus_id,label,building,room,is_default FROM accounts.campus_locations WHERE user_id=%s AND location_id=%s", (user_id, location_id))
@@ -101,7 +165,7 @@ def get_location(user_id: int, location_id: int):
 
 @catalogue.get("/restaurants")
 def list_restaurants(campus_id: int | None = None, search: str | None = None):
-    rows = fetch_all("SELECT restaurant_id,owner_user_id,campus_id,name,status FROM catalogue.restaurants WHERE status='ACTIVE' AND (%s IS NULL OR campus_id=%s) AND (%s IS NULL OR name ILIKE '%%'||%s||'%%') ORDER BY name", (campus_id, campus_id, search, search))
+    rows = fetch_all("SELECT restaurant_id,owner_user_id,campus_id,name,status FROM catalogue.restaurants WHERE status='ACTIVE' AND (%s::bigint IS NULL OR campus_id=%s) AND (%s::text IS NULL OR name ILIKE '%%'||%s||'%%') ORDER BY name", (campus_id, campus_id, search, search))
     return [row_dict(row, ["restaurant_id", "owner_user_id", "campus_id", "name", "status"]) for row in rows]
 
 
@@ -139,12 +203,14 @@ def check_item(item_id: int):
 
 
 @orders.post("/cart/items", status_code=201)
-def add_to_cart(payload: CartItemInput):
+def add_to_cart(payload: CartItemInput, request: Request):
+    require_json_accept(request)
     with transaction() as conn:
         cart = conn.execute("SELECT cart_id FROM orders.carts WHERE user_id=%s AND status='ACTIVE' AND restaurant_id=(SELECT m.restaurant_id FROM catalogue.menus m JOIN catalogue.menu_items i USING(menu_id) WHERE i.item_id=%s) LIMIT 1", (payload.user_id, payload.item_id)).fetchone()
         if not cart:
             restaurant = conn.execute("SELECT m.restaurant_id FROM catalogue.menus m JOIN catalogue.menu_items i USING(menu_id) WHERE i.item_id=%s AND i.is_available", (payload.item_id,)).fetchone()
-            if not restaurant: raise HTTPException(409, "Item is unavailable")
+            if not restaurant:
+                raise_problem("item-unavailable", "Item unavailable", 409, "The requested item is unavailable")
             cart = conn.execute("INSERT INTO orders.carts(user_id,restaurant_id) VALUES (%s,%s) RETURNING cart_id", (payload.user_id, restaurant[0])).fetchone()
         row = conn.execute("""INSERT INTO orders.cart_items(cart_id,item_id,quantity) VALUES (%s,%s,%s)
             ON CONFLICT(cart_id,item_id) DO UPDATE SET quantity=orders.cart_items.quantity+EXCLUDED.quantity
@@ -154,62 +220,300 @@ def add_to_cart(payload: CartItemInput):
 
 @orders.post("", status_code=201)
 def place_order(payload: OrderInput, request: Request, response: Response):
+    require_json_accept(request)
+    if not payload.items:
+        raise_problem(
+            "empty-cart",
+            "Empty cart",
+            422,
+            "An order must contain at least one item",
+            errors=[{"field": "items", "reason": "must contain at least one item"}],
+        )
     require_bearer(request)
-    idempotency_key = request.headers.get("Idempotency-Key", payload.idempotency_key)
+    idempotency_key = request.headers.get("Idempotency-Key") or payload.idempotency_key
+    if not idempotency_key or not idempotency_key.strip():
+        raise_problem(
+            "validation-failed",
+            "Validation failed",
+            422,
+            "Request validation failed",
+            errors=[{"field": "Idempotency-Key", "reason": "is required"}],
+        )
+    idempotency_key = idempotency_key.strip()
+    if len(idempotency_key) > 100:
+        raise_problem(
+            "validation-failed",
+            "Validation failed",
+            422,
+            "Request validation failed",
+            errors=[{"field": "Idempotency-Key", "reason": "must be at most 100 characters"}],
+        )
     with transaction() as conn:
-        item_rows = []
-        total = 0
-        restaurant_id = None
-        for item in payload.items:
-            row = conn.execute("""SELECT i.name,i.price,i.is_available,m.restaurant_id FROM catalogue.menu_items i JOIN catalogue.menus m USING(menu_id) WHERE i.item_id=%s""", (item.item_id,)).fetchone()
-            if not row or not row[2]: raise HTTPException(409, f"Item {item.item_id} is unavailable")
-            if restaurant_id is not None and restaurant_id != row[3]: raise HTTPException(422, "All items must be from one restaurant")
-            restaurant_id = row[3]; subtotal = row[1] * item.quantity; total += subtotal
-            item_rows.append((item.item_id, row[0], item.quantity, row[1], subtotal))
-        if payload.fulfilment_type == "DELIVERY" and payload.location_id is None: raise HTTPException(422, "location_id is required for delivery")
-        order = conn.execute("""INSERT INTO orders.orders(user_id,restaurant_id,location_id,fulfilment_type,scheduled_at,subtotal,total,idempotency_key,status)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'PENDING_PAYMENT') ON CONFLICT(user_id,idempotency_key) DO UPDATE SET updated_at=orders.orders.updated_at
-            RETURNING order_id,user_id,restaurant_id,location_id,fulfilment_type,scheduled_at,status,subtotal,total""", (payload.user_id, restaurant_id, payload.location_id if payload.fulfilment_type == "DELIVERY" else None, payload.fulfilment_type, payload.scheduled_at, total, total, idempotency_key)).fetchone()
-        for item_id, name, quantity, price, subtotal in item_rows:
-            conn.execute("INSERT INTO orders.order_items(order_id,item_id,item_name,quantity,unit_price,subtotal) VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING", (order[0], item_id, name, quantity, price, subtotal))
-    response.headers["Location"] = f"/orders/{order[0]}?user_id={payload.user_id}"
+        existing = conn.execute(
+            """SELECT order_id,user_id,restaurant_id,location_id,fulfilment_type,
+                      scheduled_at,status,subtotal,total
+               FROM orders.orders WHERE user_id=%s AND idempotency_key=%s""",
+            (payload.user_id, idempotency_key),
+        ).fetchone()
+        if existing:
+            order = tuple(existing[:6]) + ("PENDING_PAYMENT",) + tuple(existing[7:])
+        else:
+            location_id = payload.location_id
+            if location_id is None and payload.fulfilment_type == "DELIVERY":
+                location = conn.execute(
+                    """SELECT location_id FROM accounts.campus_locations
+                       WHERE user_id=%s AND (
+                           label=%s OR building=%s OR
+                           concat_ws(' ', building, room)=%s
+                       )
+                       ORDER BY is_default DESC, location_id LIMIT 1""",
+                    (payload.user_id, payload.address.strip(), payload.address.strip(), payload.address.strip()),
+                ).fetchone()
+                if not location:
+                    raise_problem(
+                        "validation-failed",
+                        "Validation failed",
+                        422,
+                        "Request validation failed",
+                        errors=[{"field": "address", "reason": "must match a saved campus address"}],
+                    )
+                location_id = location[0]
+            elif location_id is not None:
+                location = conn.execute(
+                    "SELECT location_id FROM accounts.campus_locations WHERE location_id=%s AND user_id=%s",
+                    (location_id, payload.user_id),
+                ).fetchone()
+                if not location:
+                    raise_problem(
+                        "validation-failed",
+                        "Validation failed",
+                        422,
+                        "Request validation failed",
+                        errors=[{"field": "location_id", "reason": "must reference an address belonging to the user"}],
+                    )
+
+            item_rows = []
+            total = 0
+            restaurant_id = None
+            for index, item in enumerate(payload.items):
+                row = conn.execute(
+                    """SELECT i.name,i.price,i.is_available,m.restaurant_id
+                       FROM catalogue.menu_items i JOIN catalogue.menus m USING(menu_id)
+                       WHERE i.item_id=%s""",
+                    (item.item_id,),
+                ).fetchone()
+                if not row or not row[2]:
+                    raise_problem(
+                        "item-unavailable",
+                        "Item unavailable",
+                        409,
+                        "One or more requested items are unavailable",
+                        errors=[{"field": f"items[{index}].item_id", "reason": "is unavailable"}],
+                    )
+                if restaurant_id is not None and restaurant_id != row[3]:
+                    raise_problem(
+                        "validation-failed",
+                        "Validation failed",
+                        422,
+                        "Request validation failed",
+                        errors=[{"field": f"items[{index}].item_id", "reason": "must be from the same restaurant"}],
+                    )
+                restaurant_id = row[3]
+                subtotal = row[1] * item.quantity
+                total += subtotal
+                item_rows.append((item.item_id, row[0], item.quantity, row[1], subtotal))
+
+            order = conn.execute(
+                """INSERT INTO orders.orders(
+                       user_id,restaurant_id,location_id,fulfilment_type,scheduled_at,
+                       subtotal,total,idempotency_key,status
+                   )
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'PENDING_PAYMENT')
+                   ON CONFLICT(user_id,idempotency_key)
+                   DO UPDATE SET updated_at=orders.orders.updated_at
+                   RETURNING order_id,user_id,restaurant_id,location_id,fulfilment_type,
+                             scheduled_at,status,subtotal,total""",
+                (
+                    payload.user_id,
+                    restaurant_id,
+                    location_id if payload.fulfilment_type == "DELIVERY" else None,
+                    payload.fulfilment_type,
+                    payload.scheduled_at,
+                    total,
+                    total,
+                    idempotency_key,
+                ),
+            ).fetchone()
+            for item_id, name, quantity, price, subtotal in item_rows:
+                conn.execute(
+                    """INSERT INTO orders.order_items(
+                           order_id,item_id,item_name,quantity,unit_price,subtotal
+                       ) VALUES (%s,%s,%s,%s,%s,%s)
+                       ON CONFLICT DO NOTHING""",
+                    (order[0], item_id, name, quantity, price, subtotal),
+                )
+    order = tuple(order)
+    response.headers["Location"] = f"/orders/{order[0]}"
     response.headers["ETag"] = resource_etag(order)
     return row_dict(order, ["order_id", "user_id", "restaurant_id", "location_id", "fulfilment_type", "scheduled_at", "status", "subtotal", "total"])
 
 
+ORDER_TRANSITIONS = {
+    "PENDING_PAYMENT": {"PLACED", "CANCELLED"},
+    "PLACED": {"ACCEPTED", "CANCELLED"},
+    "ACCEPTED": {"PREPARING", "CANCELLED"},
+    "PREPARING": {"READY", "READY_FOR_PICKUP", "OUT_FOR_DELIVERY", "CANCELLED"},
+    "READY": {"COMPLETED"},
+    "READY_FOR_PICKUP": {"COMPLETED"},
+    "OUT_FOR_DELIVERY": {"COMPLETED"},
+    "COMPLETED": set(),
+    "CANCELLED": set(),
+}
+
+
+def xml_order(payload: dict) -> str:
+    root = Element("order")
+    for key, value in payload.items():
+        node = SubElement(root, key)
+        if value is not None:
+            node.text = value.isoformat() if hasattr(value, "isoformat") else str(value)
+    return tostring(root, encoding="unicode")
+
+
+def parse_accept_header(value: str | None) -> dict[str, float]:
+    if not value or not value.strip():
+        return {"*/*": 1.0}
+    accepted = {}
+    for part in value.split(","):
+        media_type, *parameters = part.strip().lower().split(";")
+        quality = 1.0
+        for parameter in parameters:
+            key, separator, raw_value = parameter.strip().partition("=")
+            if separator and key == "q":
+                try:
+                    quality = float(raw_value)
+                except ValueError:
+                    quality = 0.0
+        accepted[media_type.strip()] = quality
+    return accepted
+
+
+def media_quality(accepted: dict[str, float], media_type: str) -> float:
+    if media_type in accepted:
+        return accepted[media_type]
+    family = media_type.split("/", 1)[0] + "/*"
+    if family in accepted:
+        return accepted[family]
+    return accepted.get("*/*", 0)
+
+
+def negotiate_order_response(request: Request, *, supports_xml: bool) -> str:
+    accepted = parse_accept_header(request.headers.get("Accept"))
+    json_quality = media_quality(accepted, "application/json")
+    xml_quality = media_quality(accepted, "application/xml")
+    if supports_xml and xml_quality > json_quality and xml_quality > 0:
+        return "xml"
+    if json_quality > 0:
+        return "json"
+    if supports_xml and xml_quality > 0:
+        return "xml"
+    raise_problem("not-acceptable", "Not acceptable", 406, "Only supported representations are available")
+
+
+def require_json_accept(request: Request) -> None:
+    if negotiate_order_response(request, supports_xml=False) != "json":
+        raise_problem("not-acceptable", "Not acceptable", 406, "Only application/json is supported for this operation")
+
+
 @orders.get("/{order_id}")
-def get_order(order_id: int, request: Request, response: Response, user_id: int = Query(...)):
+def get_order(order_id: int, request: Request, response: Response, user_id: int | None = Query(default=None)):
+    representation = negotiate_order_response(request, supports_xml=True)
     require_bearer(request)
-    row = fetch_one("SELECT order_id,user_id,restaurant_id,location_id,fulfilment_type,scheduled_at,status,subtotal,total FROM orders.orders WHERE order_id=%s AND user_id=%s", (order_id, user_id))
+    row = fetch_one(
+        """SELECT order_id,user_id,restaurant_id,location_id,fulfilment_type,
+                  scheduled_at,status,subtotal,total
+           FROM orders.orders
+           WHERE order_id=%s AND (%s::bigint IS NULL OR user_id=%s)""",
+        (order_id, user_id, user_id),
+    )
     if not row:
-        missing()
+        raise_problem("order-not-found", "Order not found", 404, "The requested order does not exist")
     etag = resource_etag(row)
     response.headers["ETag"] = etag
     response.headers["Cache-Control"] = "private, max-age=0, must-revalidate"
     if request.headers.get("If-None-Match") == etag:
         response.status_code = 304
         return None
-    return row_dict(row, ["order_id", "user_id", "restaurant_id", "location_id", "fulfilment_type", "scheduled_at", "status", "subtotal", "total"])
+    result = row_dict(row, ["order_id", "user_id", "restaurant_id", "location_id", "fulfilment_type", "scheduled_at", "status", "subtotal", "total"])
+    if representation == "xml":
+        return Response(
+            content=xml_order(result),
+            media_type="application/xml; charset=utf-8",
+            headers={"ETag": etag, "Cache-Control": response.headers["Cache-Control"]},
+        )
+    return result
 
 @orders.api_route("/{order_id}", methods=["PUT", "PATCH"])
 def update_order(order_id: int, payload: OrderStatusInput, request: Request, response: Response, user_id: int = Query(...)):
+    require_json_accept(request)
     require_bearer(request)
     current = fetch_one("SELECT order_id,user_id,restaurant_id,location_id,fulfilment_type,scheduled_at,status,subtotal,total FROM orders.orders WHERE order_id=%s AND user_id=%s", (order_id, user_id))
     if not current:
-        missing()
+        raise_problem("order-not-found", "Order not found", 404, "The requested order does not exist")
     current_etag = resource_etag(current)
     if request.headers.get("If-Match") and request.headers["If-Match"] != current_etag:
-        raise HTTPException(status_code=412, detail="The order has changed")
+        raise_problem("precondition-failed", "Precondition failed", 412, "The order has changed")
+    if payload.status != current[6] and payload.status not in ORDER_TRANSITIONS.get(current[6], set()):
+        raise_problem(
+            "illegal-transition",
+            "Illegal order transition",
+            409,
+            f"An order in status {current[6]} cannot transition to {payload.status}",
+        )
     row = fetch_one("UPDATE orders.orders SET status=%s,updated_at=now() WHERE order_id=%s AND user_id=%s RETURNING order_id,user_id,restaurant_id,location_id,fulfilment_type,scheduled_at,status,subtotal,total", (payload.status, order_id, user_id))
+    if not row:
+        raise_problem("order-not-found", "Order not found", 404, "The requested order does not exist")
     response.headers["ETag"] = resource_etag(row)
     return row_dict(row, ["order_id", "user_id", "restaurant_id", "location_id", "fulfilment_type", "scheduled_at", "status", "subtotal", "total"])
 
 
+@orders.delete("/{order_id}", status_code=204)
+def delete_order(order_id: int, request: Request, user_id: int = Query(...)):
+    require_json_accept(request)
+    require_bearer(request)
+    with transaction() as conn:
+        row = conn.execute(
+            """UPDATE orders.orders SET status='CANCELLED',updated_at=now()
+               WHERE order_id=%s AND user_id=%s AND status IN ('PENDING_PAYMENT','PLACED')
+               RETURNING order_id""",
+            (order_id, user_id),
+        ).fetchone()
+        if row:
+            return Response(status_code=204)
+        current = conn.execute(
+            "SELECT status FROM orders.orders WHERE order_id=%s AND user_id=%s",
+            (order_id, user_id),
+        ).fetchone()
+        if not current:
+            raise_problem("order-not-found", "Order not found", 404, "The requested order does not exist")
+        if current[0] != "CANCELLED":
+            raise_problem("illegal-transition", "Illegal order transition", 409, "Only pending or placed orders can be cancelled")
+    return Response(status_code=204)
+
+
 @orders.post("/{order_id}/cancel")
 def cancel_order(order_id: int, request: Request, user_id: int = Query(...)):
+    require_json_accept(request)
     require_bearer(request)
     row = fetch_one("UPDATE orders.orders SET status='CANCELLED',updated_at=now() WHERE order_id=%s AND user_id=%s AND status IN ('PENDING_PAYMENT','PLACED') RETURNING order_id,status", (order_id, user_id))
-    return row_dict(row, ["order_id", "status"]) or missing("Order cannot be cancelled")
+    if row:
+        return row_dict(row, ["order_id", "status"])
+    current = fetch_one("SELECT status FROM orders.orders WHERE order_id=%s AND user_id=%s", (order_id, user_id))
+    if not current:
+        raise_problem("order-not-found", "Order not found", 404, "The requested order does not exist")
+    if current[0] == "CANCELLED":
+        return row_dict((order_id, "CANCELLED"), ["order_id", "status"])
+    raise_problem("illegal-transition", "Illegal order transition", 409, "Only pending or placed orders can be cancelled")
 
 
 @payments.post("/charge", status_code=201)
@@ -219,6 +523,14 @@ def charge(payload: PaymentInput):
     reference = hashlib.sha256(f"{payload.user_id}:{payload.order_reference}:{datetime.now(timezone.utc).isoformat()}".encode()).hexdigest()[:32]
     row = fetch_one("INSERT INTO payments.payments(order_id,user_id,amount,status,provider_reference) VALUES (%s,%s,%s,'CAPTURED',%s) RETURNING payment_id,order_id,amount,status,provider_reference", (payload.order_reference, payload.user_id, payload.amount, reference))
     return {"payment_reference": row[4], "payment_id": row[0], "status": row[3], "amount": row[2]}
+
+
+@payments.get("/methods")
+def list_payment_methods(user_id: int = Query(...)):
+    rows = fetch_all("""SELECT payment_method_id,method_type,last4,status
+        FROM payments.payment_methods WHERE user_id=%s AND status='ACTIVE'
+        ORDER BY payment_method_id""", (user_id,))
+    return [row_dict(row, ["payment_method_id", "method_type", "last4", "status"]) for row in rows]
 
 
 @payments.get("/{payment_reference}")
@@ -286,11 +598,19 @@ async def lifespan(_: FastAPI):
     yield
 
 
+def cors_allowed_origins() -> list[str]:
+    configured = os.getenv(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:3000,http://localhost:3001,http://localhost:5500,http://127.0.0.1:5500",
+    )
+    return [origin.strip() for origin in configured.split(",") if origin.strip()]
+
+
 app = FastAPI(title="CampusEats Services", version="1.0.0", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000").split(","),
+    allow_origins=cors_allowed_origins(),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Accept", "Authorization", "Content-Type", "If-Match", "If-None-Match", "Idempotency-Key", "X-HTTP-Method-Override", "X-Client-ID"],
@@ -299,6 +619,157 @@ app.add_middleware(
 RATE_LIMIT = 60
 RATE_WINDOW_SECONDS = 60
 rate_buckets: dict[str, tuple[float, int]] = {}
+
+
+def validation_field(location: tuple) -> str:
+    parts = [str(part) for part in location if part not in {"body", "query", "path", "header"}]
+    if not parts:
+        return "address" if not location else "request"
+    field = parts[0]
+    for part in parts[1:]:
+        if part.isdigit():
+            field += f"[{part}]"
+        else:
+            field += f".{part}"
+    return field.replace(".quantity", ".qty")
+
+
+def validation_reason(error: dict, field: str) -> str:
+    if field.endswith(".qty"):
+        return "must be an integer >= 1"
+    if field == "address":
+        return "must be a non-empty address"
+    reason_map = {
+        "int_type": "must be an integer",
+        "int_parsing": "must be an integer",
+        "greater_than": "must be greater than zero",
+        "string_type": "must be a string",
+        "string_too_short": "must not be empty",
+        "missing": "is required",
+        "json_invalid": "must be valid JSON",
+    }
+    return reason_map.get(error.get("type"), error.get("msg", "is invalid"))
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
+    validation_errors = []
+    for error in exc.errors():
+        field = validation_field(tuple(error.get("loc", ())))
+        validation_errors.append({"field": field, "reason": validation_reason(error, field)})
+
+    if request.url.path == "/orders":
+        try:
+            body = json.loads(await request.body())
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return problem(
+                "validation-failed",
+                "Malformed JSON",
+                400,
+                "The request body must contain valid JSON",
+                instance=request_instance(request),
+                errors=[{"field": "request", "reason": "must be valid JSON"}],
+            )
+        if isinstance(body, dict) and not str(body.get("address") or "").strip():
+            if not any(error["field"] == "address" for error in validation_errors):
+                validation_errors.append({"field": "address", "reason": "must be a non-empty address"})
+    status_code = 400 if any(error.get("type") == "json_invalid" for error in exc.errors()) else 422
+    return problem(
+        "validation-failed",
+        "Malformed JSON" if status_code == 400 else "Validation failed",
+        status_code,
+        "The request body must contain valid JSON" if status_code == 400 else "Request validation failed",
+        instance=request_instance(request),
+        errors=validation_errors,
+    )
+
+
+@app.exception_handler(ApiProblem)
+async def api_problem_exception_handler(request: Request, exc: ApiProblem):
+    headers = dict(exc.headers)
+    if exc.status_code in {429, 503}:
+        headers.setdefault("Retry-After", "3")
+    response = problem(
+        exc.type,
+        exc.title,
+        exc.status_code,
+        exc.detail,
+        instance=request_instance(request),
+        errors=exc.errors,
+    )
+    response.headers.update(headers)
+    return response
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    status = exc.status_code
+    title_map = {
+        400: ("validation-failed", "Bad request"),
+        401: ("unauthorized", "Unauthorized"),
+        402: ("payment-declined", "Payment declined"),
+        404: ("order-not-found" if request.url.path.startswith("/orders/") else "not-found", "Resource not found"),
+        405: ("method-not-allowed", "Method not allowed"),
+        406: ("not-acceptable", "Not acceptable"),
+        409: ("illegal-transition", "Conflict"),
+        422: ("validation-failed", "Validation failed"),
+        429: ("rate-limited", "Rate limit exceeded"),
+        412: ("precondition-failed", "Precondition failed"),
+        500: ("internal-error", "Internal server error"),
+        503: ("service-unavailable", "Service unavailable"),
+    }
+    problem_type, title = title_map.get(status, ("internal-error", "Request failed"))
+    if status == 503:
+        detail = "A required service is temporarily unavailable"
+    elif status >= 500:
+        detail = "An unexpected error occurred"
+    else:
+        detail = str(exc.detail)
+    headers = dict(exc.headers or {})
+    if status in {429, 503}:
+        headers.setdefault("Retry-After", "3")
+    errors = [{"field": "request", "reason": detail}] if status == 422 else None
+    response = problem(problem_type, title, status, detail, instance=request_instance(request), errors=errors)
+    response.headers.update(headers)
+    return response
+
+
+@app.exception_handler(StarletteHTTPException)
+async def starlette_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    if exc.status_code == 405:
+        type_, title, detail = "method-not-allowed", "Method not allowed", "The HTTP method is not supported"
+    elif exc.status_code == 404 and request.url.path.startswith("/orders/"):
+        type_, title, detail = "order-not-found", "Order not found", "The requested order does not exist"
+    else:
+        type_, title, detail = "not-found", "Resource not found", "The requested resource does not exist"
+    return problem(type_, title, exc.status_code, detail, instance=request_instance(request))
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.error(
+        "Unhandled request failure for %s %s",
+        request.method,
+        request.url.path,
+        exc_info=(type(exc), exc, exc.__traceback__),
+    )
+    if isinstance(exc, (TimeoutError, psycopg.OperationalError, psycopg.errors.QueryCanceled)):
+        response = problem(
+            "service-unavailable",
+            "Service unavailable",
+            503,
+            "A required service is temporarily unavailable",
+            instance=request_instance(request),
+        )
+        response.headers["Retry-After"] = "3"
+        return response
+    return problem(
+        "internal-error",
+        "Internal server error",
+        500,
+        "An unexpected error occurred",
+        instance=request_instance(request),
+    )
 
 
 @app.middleware("http")
@@ -313,19 +784,29 @@ async def http_policy(request: Request, call_next):
     if now - started >= RATE_WINDOW_SECONDS:
         started, count = now, 0
     if count >= RATE_LIMIT:
-        response = JSONResponse({"detail": "Rate limit exceeded"}, status_code=429, headers={"Retry-After": str(max(1, int(RATE_WINDOW_SECONDS - (now - started))))})
+        response = problem(
+            "rate-limited",
+            "Rate limit exceeded",
+            429,
+            "Rate limit exceeded",
+            instance=request_instance(request),
+        )
+        response.headers["Retry-After"] = str(max(1, int(RATE_WINDOW_SECONDS - (now - started))))
         response.headers["X-RateLimit-Limit"] = str(RATE_LIMIT)
         response.headers["X-RateLimit-Remaining"] = "0"
+        response.headers["X-Content-Type-Options"] = "nosniff"
         return response
     rate_buckets[client_id] = (started, count + 1)
 
-    accept = request.headers.get("Accept", "*/*")
-    if request.method != "OPTIONS" and "*/*" not in accept and "application/json" not in accept:
-        response = JSONResponse({"detail": "Only application/json is supported"}, status_code=406)
+    accepted = parse_accept_header(request.headers.get("Accept"))
+    path = getattr(getattr(request, "url", None), "path", "/")
+    is_orders_path = path == "/orders" or path.startswith("/orders/")
+    if request.method != "OPTIONS" and not is_orders_path and media_quality(accepted, "application/json") <= 0:
+        response = problem("not-acceptable", "Not acceptable", 406, "Only application/json is supported", instance=request_instance(request))
     elif request.method == "OPTIONS":
         response = Response(status_code=204, headers={"Allow": "GET, POST, PUT, PATCH, DELETE, OPTIONS"})
         origin = request.headers.get("Origin")
-        allowed_origins = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+        allowed_origins = cors_allowed_origins()
         if origin in allowed_origins:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
@@ -336,6 +817,9 @@ async def http_policy(request: Request, call_next):
     response.headers.setdefault("X-RateLimit-Limit", str(RATE_LIMIT))
     response.headers.setdefault("X-RateLimit-Remaining", str(max(0, RATE_LIMIT - count - 1)))
     response.headers["X-Content-Type-Options"] = "nosniff"
+    content_type = response.headers.get("Content-Type", "application/json")
+    if "charset=" not in content_type.lower():
+        response.headers["Content-Type"] = f"{content_type}; charset=utf-8"
     if os.getenv("ENVIRONMENT", "development") == "production":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
@@ -367,5 +851,9 @@ def database_health():
     try:
         check_connection()
     except Exception as exc:
+        logger.error(
+            "Database health check failed",
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
         raise HTTPException(status_code=503, detail="Database is unavailable") from exc
     return {"status": "ok", "database": "connected"}

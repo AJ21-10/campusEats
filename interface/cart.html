@@ -40,6 +40,7 @@
         </div>
 
         <form id="checkoutForm" class="stacked-form">
+          <p class="muted-note">Checkout creates an order in the API. It remains pending payment; no payment is charged by this interface.</p>
           <label>
             <span>Fulfilment type</span>
             <select id="fulfilmentType">
@@ -47,9 +48,17 @@
               <option value="DELIVERY">Delivery</option>
             </select>
           </label>
+          <label id="deliveryLocationField" hidden>
+            <span>Saved delivery location ID</span>
+            <select id="locationId" required>
+              <option value="">Loading saved locations…</option>
+            </select>
+          </label>
           <label>
-            <span>Payment method ID</span>
-            <input id="paymentMethodId" type="number" min="1" value="1" />
+            <span>Payment method</span>
+            <select id="paymentMethodId" required>
+              <option value="">Loading payment methods…</option>
+            </select>
           </label>
           <button type="submit">Place order</button>
         </form>
