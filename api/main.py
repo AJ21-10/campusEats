@@ -1,15 +1,21 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import hashlib
+import json
+import os
+import time
 
-from fastapi import APIRouter, FastAPI, HTTPException, Query, status
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request, Response, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
 from passlib.context import CryptContext
 
 from api.db import check_connection, fetch_all, fetch_one, transaction
 from api.schemas import (
     AssignmentInput, CartItemInput, FulfilmentInput, ItemInput, LocationInput,
     MenuInput, NotificationInput, OrderInput, PaymentInput, ProfileInput,
-    RefundInput, RegisterInput, RestaurantInput, ReviewInput, row_dict,
+    RefundInput, RegisterInput, RestaurantInput, ReviewInput, OrderStatusInput, row_dict,
 )
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -17,6 +23,16 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def missing(detail="Resource not found"):
     raise HTTPException(status_code=404, detail=detail)
+
+
+def require_bearer(request: Request):
+    authorization = request.headers.get("Authorization", "")
+    if not authorization.startswith("Bearer ") or not authorization[7:].strip():
+        raise HTTPException(status_code=401, detail="Bearer authorization is required")
+
+
+def resource_etag(row) -> str:
+    return '"' + hashlib.sha256(json.dumps(list(row), default=str, sort_keys=True).encode()).hexdigest() + '"'
 
 
 def created(data):
@@ -137,7 +153,9 @@ def add_to_cart(payload: CartItemInput):
 
 
 @orders.post("", status_code=201)
-def place_order(payload: OrderInput):
+def place_order(payload: OrderInput, request: Request, response: Response):
+    require_bearer(request)
+    idempotency_key = request.headers.get("Idempotency-Key", payload.idempotency_key)
     with transaction() as conn:
         item_rows = []
         total = 0
@@ -150,21 +168,46 @@ def place_order(payload: OrderInput):
             item_rows.append((item.item_id, row[0], item.quantity, row[1], subtotal))
         if payload.fulfilment_type == "DELIVERY" and payload.location_id is None: raise HTTPException(422, "location_id is required for delivery")
         order = conn.execute("""INSERT INTO orders.orders(user_id,restaurant_id,location_id,fulfilment_type,scheduled_at,subtotal,total,idempotency_key,status)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'PENDING_PAYMENT') ON CONFLICT(user_id,idempotency_key) DO UPDATE SET updated_at=now()
-            RETURNING order_id,user_id,restaurant_id,location_id,fulfilment_type,scheduled_at,status,subtotal,total""", (payload.user_id, restaurant_id, payload.location_id if payload.fulfilment_type == "DELIVERY" else None, payload.fulfilment_type, payload.scheduled_at, total, total, payload.idempotency_key)).fetchone()
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'PENDING_PAYMENT') ON CONFLICT(user_id,idempotency_key) DO UPDATE SET updated_at=orders.orders.updated_at
+            RETURNING order_id,user_id,restaurant_id,location_id,fulfilment_type,scheduled_at,status,subtotal,total""", (payload.user_id, restaurant_id, payload.location_id if payload.fulfilment_type == "DELIVERY" else None, payload.fulfilment_type, payload.scheduled_at, total, total, idempotency_key)).fetchone()
         for item_id, name, quantity, price, subtotal in item_rows:
             conn.execute("INSERT INTO orders.order_items(order_id,item_id,item_name,quantity,unit_price,subtotal) VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING", (order[0], item_id, name, quantity, price, subtotal))
+    response.headers["Location"] = f"/orders/{order[0]}?user_id={payload.user_id}"
+    response.headers["ETag"] = resource_etag(order)
     return row_dict(order, ["order_id", "user_id", "restaurant_id", "location_id", "fulfilment_type", "scheduled_at", "status", "subtotal", "total"])
 
 
 @orders.get("/{order_id}")
-def get_order(order_id: int, user_id: int = Query(...)):
+def get_order(order_id: int, request: Request, response: Response, user_id: int = Query(...)):
+    require_bearer(request)
     row = fetch_one("SELECT order_id,user_id,restaurant_id,location_id,fulfilment_type,scheduled_at,status,subtotal,total FROM orders.orders WHERE order_id=%s AND user_id=%s", (order_id, user_id))
-    return row_dict(row, ["order_id", "user_id", "restaurant_id", "location_id", "fulfilment_type", "scheduled_at", "status", "subtotal", "total"]) or missing()
+    if not row:
+        missing()
+    etag = resource_etag(row)
+    response.headers["ETag"] = etag
+    response.headers["Cache-Control"] = "private, max-age=0, must-revalidate"
+    if request.headers.get("If-None-Match") == etag:
+        response.status_code = 304
+        return None
+    return row_dict(row, ["order_id", "user_id", "restaurant_id", "location_id", "fulfilment_type", "scheduled_at", "status", "subtotal", "total"])
+
+@orders.api_route("/{order_id}", methods=["PUT", "PATCH"])
+def update_order(order_id: int, payload: OrderStatusInput, request: Request, response: Response, user_id: int = Query(...)):
+    require_bearer(request)
+    current = fetch_one("SELECT order_id,user_id,restaurant_id,location_id,fulfilment_type,scheduled_at,status,subtotal,total FROM orders.orders WHERE order_id=%s AND user_id=%s", (order_id, user_id))
+    if not current:
+        missing()
+    current_etag = resource_etag(current)
+    if request.headers.get("If-Match") and request.headers["If-Match"] != current_etag:
+        raise HTTPException(status_code=412, detail="The order has changed")
+    row = fetch_one("UPDATE orders.orders SET status=%s,updated_at=now() WHERE order_id=%s AND user_id=%s RETURNING order_id,user_id,restaurant_id,location_id,fulfilment_type,scheduled_at,status,subtotal,total", (payload.status, order_id, user_id))
+    response.headers["ETag"] = resource_etag(row)
+    return row_dict(row, ["order_id", "user_id", "restaurant_id", "location_id", "fulfilment_type", "scheduled_at", "status", "subtotal", "total"])
 
 
 @orders.post("/{order_id}/cancel")
-def cancel_order(order_id: int, user_id: int = Query(...)):
+def cancel_order(order_id: int, request: Request, user_id: int = Query(...)):
+    require_bearer(request)
     row = fetch_one("UPDATE orders.orders SET status='CANCELLED',updated_at=now() WHERE order_id=%s AND user_id=%s AND status IN ('PENDING_PAYMENT','PLACED') RETURNING order_id,status", (order_id, user_id))
     return row_dict(row, ["order_id", "status"]) or missing("Order cannot be cancelled")
 
@@ -244,6 +287,58 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="CampusEats Services", version="1.0.0", lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000").split(","),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Accept", "Authorization", "Content-Type", "If-Match", "If-None-Match", "Idempotency-Key", "X-HTTP-Method-Override", "X-Client-ID"],
+)
+
+RATE_LIMIT = 60
+RATE_WINDOW_SECONDS = 60
+rate_buckets: dict[str, tuple[float, int]] = {}
+
+
+@app.middleware("http")
+async def http_policy(request: Request, call_next):
+    method = request.headers.get("X-HTTP-Method-Override", request.method).upper()
+    if request.method == "POST" and method in {"PUT", "PATCH", "DELETE"}:
+        request.scope["method"] = method
+
+    client_id = request.headers.get("X-Client-ID") or (request.client.host if request.client else "unknown")
+    now = time.monotonic()
+    started, count = rate_buckets.get(client_id, (now, 0))
+    if now - started >= RATE_WINDOW_SECONDS:
+        started, count = now, 0
+    if count >= RATE_LIMIT:
+        response = JSONResponse({"detail": "Rate limit exceeded"}, status_code=429, headers={"Retry-After": str(max(1, int(RATE_WINDOW_SECONDS - (now - started))))})
+        response.headers["X-RateLimit-Limit"] = str(RATE_LIMIT)
+        response.headers["X-RateLimit-Remaining"] = "0"
+        return response
+    rate_buckets[client_id] = (started, count + 1)
+
+    accept = request.headers.get("Accept", "*/*")
+    if request.method != "OPTIONS" and "*/*" not in accept and "application/json" not in accept:
+        response = JSONResponse({"detail": "Only application/json is supported"}, status_code=406)
+    elif request.method == "OPTIONS":
+        response = Response(status_code=204, headers={"Allow": "GET, POST, PUT, PATCH, DELETE, OPTIONS"})
+        origin = request.headers.get("Origin")
+        allowed_origins = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+        if origin in allowed_origins:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Accept, Authorization, Content-Type, If-Match, If-None-Match, Idempotency-Key, X-HTTP-Method-Override, X-Client-ID"
+    else:
+        response = await call_next(request)
+
+    response.headers.setdefault("X-RateLimit-Limit", str(RATE_LIMIT))
+    response.headers.setdefault("X-RateLimit-Remaining", str(max(0, RATE_LIMIT - count - 1)))
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    if os.getenv("ENVIRONMENT", "development") == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 from api.services.accounts.router import router as accounts_router
 from api.services.catalogue.router import router as catalogue_router
 from api.services.orders.router import router as orders_router

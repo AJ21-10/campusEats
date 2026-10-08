@@ -62,6 +62,12 @@ class OrderInput(BaseModel):
     scheduled_at: datetime | None = None
     idempotency_key: str = Field(min_length=1, max_length=100)
 
+class OrderStatusInput(BaseModel):
+    status: Literal[
+        "PENDING_PAYMENT", "PLACED", "ACCEPTED", "PREPARING", "READY",
+        "OUT_FOR_DELIVERY", "READY_FOR_PICKUP", "COMPLETED", "CANCELLED",
+    ]
+
 
 class PaymentInput(BaseModel):
     user_id: int
