@@ -1,0 +1,55 @@
+You are helping me complete CS543 Web Services Assignment 6 ("Honest responses: status codes, errors & validation"). This builds on my existing A5 Orders service. DO NOT create a new service; modify the existing one in place.
+
+STEP 0 - Inspect first
+Read the whole project (routes, handlers, helpers, openapi.yaml, any existing tests/scripts, idempotency and timeout logic from A5). Tell me the stack and summarize the current endpoints and any responses that return 200 for a failure. Then proceed.
+
+STEP 1 - Status codes (Part A)
+Endpoints: POST /orders, GET /orders/{id}, PATCH /orders/{id}, DELETE /orders/{id} (and GET /orders if it exists).
+- Map each endpoint's success status and each real failure status, e.g. POST 201, GET 200, PATCH 200, DELETE 204; 404 unknown id, 409 or 422 illegal transition (pick one and justify it), 422 validation, 402 payment declined, 406 bad Accept, 429 rate limit, 503 unavailable, 500 unexpected.
+- Find every place that returns 200 with { "ok": false } or similar and fix it. The HTTP status must be the result.
+- POST /orders returns 201 with header Location: /orders/{id}.
+- 429 and 503 must include a Retry-After header.
+
+STEP 2 - One error shape (Part B)
+- Create or refactor a single problem() helper producing RFC 7807/9457 Problem Details: type, title, status, detail (optional: instance, errors[]), with Content-Type: application/problem+json; charset=utf-8. ALL failures must go through it, including the 404 for unknown routes, 406, 429, and 500.
+- Stable type catalogue (document it in NOTES.md and openapi.yaml): empty-cart, item-unavailable, payment-declined, order-not-found, illegal-transition, plus validation-failed, rate-limited, not-acceptable, internal-error (and service-unavailable if used). Use one consistent format, e.g. "https://api.example.com/problems/empty-cart" or a plain slug.
+- Validation failures return 422 with an errors[] array: [{ "field": "items[0].qty", "reason": "must be an integer >= 1" }, ...].
+- Add a global error handler and try/catch around risky work (DB, payment, etc.). Log the real error and stack server-side only; return a clean mapped error (e.g. 500 internal-error with a generic detail, or 503 for downstream timeouts). Never leak stack traces, SQL/DB messages, file paths, or library names.
+
+STEP 3 - Validation & content negotiation (Part C)
+- POST /orders body rules: items is a non-empty array; each item qty is an integer >= 1 (reject 0, negatives, floats, strings); address is required (non-empty). Also validate item identifiers if the existing model has them.
+- Validate BEFORE doing any work (no DB writes, no payment, no idempotency-key consumption on invalid input) and collect ALL errors, then return one 422. Invalid JSON syntax -> 400 with Problem Details.
+- Honour Accept: default application/json; application/xml when requested (implement a simple JSON->XML serializer for orders); */* or missing -> JSON; anything unsupported -> 406 Problem Details (error body may fall back to application/problem+json).
+- Every response, including errors, sets Content-Type with charset=utf-8.
+
+STEP 4 - Regression safety (D4)
+Re-run/re-create my A5 checks: idempotency (same Idempotency-Key replays the same result and creates no duplicate order) and timeout behaviour. Confirm they still pass and that the new error handling did not break them. Make sure the idempotency replay returns the same status/headers (including Location).
+
+STEP 5 - OpenAPI
+Update openapi.yaml: for every endpoint list all possible status codes, a reusable components/schemas/ProblemDetails schema (plus ValidationProblem extending it with errors[]), responses with content type application/problem+json, the Location and Retry-After headers, and the Accept/XML response on GET /orders/{id}. Validate the YAML with a linter if available.
+
+STEP 6 - Deliverables
+1. Updated source code.
+2. openapi.yaml (updated).
+3. transcript.txt: a real curl -i transcript (actually run the server and capture output; do not fabricate), with section headings, covering:
+   D1 happy path: POST -> 201 + Location + JSON body, then GET that Location.
+   D2 every failure: empty cart, qty <= 0 (and a two-bad-fields case), unknown id (404), illegal transition, payment declined / item unavailable if reachable, rate limit (429 with Retry-After), malformed JSON, bad Accept (406).
+   D3 negotiation: GET order with Accept: application/xml (and application/json for comparison).
+   D4 idempotency replay + timeout check.
+   A script (run_transcript.sh) that generates transcript.txt is welcome.
+4. NOTES.md answering exactly these, numbered 1-7:
+   1) status map: each endpoint, success status, each failure status, one line why each;
+   2) type catalogue: stable string and trigger for each;
+   3) one real Problem Details body pasted from the service, with each field labelled;
+   4) a field-level 422 reporting two bad fields at once (real output);
+   5) which endpoints are safe to retry and which status codes tell a client so (retry only transient: 429/503/timeouts honouring Retry-After; GET/DELETE/PUT idempotent; POST only with Idempotency-Key; never retry a 4xx unchanged);
+   6) where an internal error was mapped to a clean client error and what was hidden;
+   7) the same order as JSON and XML with the Accept header that chose each.
+5. A cover page/README first section listing team roll numbers and names (leave clearly marked placeholders: [Roll No] - [Name]).
+6. Package everything into a single zip (e.g. A06_submission.zip) with: source, openapi.yaml, transcript.txt, NOTES.md. Exclude node_modules / venv / build artefacts.
+
+Working rules
+- Make changes step by step and run the server and tests after each step.
+- Keep my existing code style and structure; make minimal, clean diffs.
+- Show me a short summary of what changed per file when finished, and list anything you could not verify.
+- If something in the A5 design is ambiguous (e.g. 409 vs 422 for illegal transitions), choose one, apply it consistently, and state the reasoning in NOTES.md.

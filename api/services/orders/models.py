@@ -1,3 +1,3 @@
-from api.schemas import CartItemInput, OrderInput, OrderItemInput
+from api.schemas import CartItemInput, OrderInput, OrderItemInput, OrderStatusInput
 
-__all__ = ["CartItemInput", "OrderInput", "OrderItemInput"]
+__all__ = ["CartItemInput", "OrderInput", "OrderItemInput", "OrderStatusInput"]

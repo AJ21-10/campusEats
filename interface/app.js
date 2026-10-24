@@ -178,6 +178,17 @@ async function apiRequest(path, options = {}) {
   return payload;
 }
 
+async function catalogueQuery(query, variables = {}) {
+  const payload = await apiRequest('/catalogue/graphql', {
+    method: 'POST',
+    body: JSON.stringify({ query, variables }),
+  });
+  if (payload.errors?.length) {
+    throw new Error(payload.errors.map((error) => error.message).join('; '));
+  }
+  return payload.data;
+}
+
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (character) => ({
     '&': '&amp;',
@@ -292,12 +303,20 @@ async function loadRestaurants() {
   if (!cardsEl || !statusEl) return;
 
   try {
-    const restaurants = await apiRequest('/catalogue/restaurants');
-    const searchValue = (document.getElementById('restaurantSearch')?.value || '').trim().toLowerCase();
-    const filtered = restaurants.filter((restaurant) => {
-      if (!searchValue) return true;
-      return restaurant.name.toLowerCase().includes(searchValue);
+    const result = await catalogueQuery(`
+      query Restaurants($search: String) {
+        restaurants(search: $search) {
+          restaurantId
+          campusId
+          name
+          status
+        }
+      }
+    `, {
+      search: (document.getElementById('restaurantSearch')?.value || '').trim() || null,
     });
+    const restaurants = result.restaurants;
+    const filtered = restaurants;
 
     if (!filtered.length) {
       cardsEl.innerHTML = '<div class="empty-state">No restaurants match your search.</div>';
@@ -313,9 +332,9 @@ async function loadRestaurants() {
               <h3>${escapeHtml(restaurant.name)}</h3>
               <span class="status-badge">${escapeHtml(restaurant.status)}</span>
             </div>
-            <p>Campus ${escapeHtml(restaurant.campus_id)}</p>
+            <p>Campus ${escapeHtml(restaurant.campusId)}</p>
             <div class="restaurant-actions">
-              <button class="secondary-btn" data-restaurant-id="${restaurant.restaurant_id}">View menu</button>
+              <button class="secondary-btn" data-restaurant-id="${restaurant.restaurantId}">View menu</button>
             </div>
           </article>
         `,
@@ -367,13 +386,30 @@ async function loadRestaurantPage() {
   }
 
   try {
-    const items = await apiRequest(`/catalogue/restaurants/${restaurantId}/menu`);
-    const restaurant = (await apiRequest('/catalogue/restaurants')).find((entry) => Number(entry.restaurant_id) === Number(restaurantId)) || { name: 'Restaurant', campus_id: 'N/A', status: 'ACTIVE' };
+    const result = await catalogueQuery(`
+      query Restaurant($restaurantId: Int!) {
+        restaurant(restaurantId: $restaurantId) {
+          name
+          campusId
+          status
+          menuItems {
+            itemId
+            name
+            description
+            price
+            isAvailable
+          }
+        }
+      }
+    `, { restaurantId });
+    const restaurant = result.restaurant;
+    if (!restaurant) throw new Error('Restaurant not found');
+    const items = restaurant.menuItems;
 
     if (restaurantNameEl) restaurantNameEl.textContent = restaurant.name;
     if (restaurantMetaEl) {
       restaurantMetaEl.innerHTML = `
-        <span>Campus: ${escapeHtml(restaurant.campus_id)}</span>
+        <span>Campus: ${escapeHtml(restaurant.campusId)}</span>
         <span>Status: ${escapeHtml(restaurant.status)}</span>
         <span>Items: ${items.length}</span>
       `;
@@ -393,11 +429,11 @@ async function loadRestaurantPage() {
               <h3>${escapeHtml(item.name)}</h3>
               <p>${escapeHtml(item.description || 'Freshly prepared campus favorite')}</p>
               <div class="menu-meta">
-                <span>${item.is_available ? 'Available' : 'Unavailable'}</span>
+                <span>${item.isAvailable ? 'Available' : 'Unavailable'}</span>
                 <span>${formatCurrency(item.price)}</span>
               </div>
             </div>
-            <button class="primary-btn add-to-cart" data-item-id="${item.item_id}" data-item-name="${escapeHtml(item.name)}" data-item-price="${item.price}" ${item.is_available ? '' : 'disabled'}>
+            <button class="primary-btn add-to-cart" data-item-id="${item.itemId}" data-item-name="${escapeHtml(item.name)}" data-item-price="${item.price}" ${item.isAvailable ? '' : 'disabled'}>
               Add to cart
             </button>
           </div>
@@ -577,6 +613,7 @@ async function placeOrderFromCart(event) {
   const fulfilmentType = document.getElementById('fulfilmentType').value;
   const paymentMethodId = Number(document.getElementById('paymentMethodId').value || 1);
   const locationId = Number(document.getElementById('locationId').value);
+  const selectedAddress = document.querySelector('#locationId option:checked')?.textContent?.trim();
   if (fulfilmentType === 'DELIVERY' && !locationId) {
     setStatus(cartStatus, 'Choose a saved delivery location or select pickup.', 'error');
     return;
@@ -607,6 +644,7 @@ async function placeOrderFromCart(event) {
       items: cart.map((item) => ({ item_id: item.item_id, quantity: item.quantity })),
       payment_method_id: paymentMethodId,
       fulfilment_type: fulfilmentType,
+      address: selectedAddress || 'Campus pickup',
       location_id: fulfilmentType === 'DELIVERY' ? locationId : null,
       idempotency_key: idempotencyKey,
     };

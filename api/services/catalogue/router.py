@@ -1,11 +1,11 @@
-from fastapi import APIRouter
+from strawberry.fastapi import GraphQLRouter
 
-from api.main import add_item, check_item, create_menu, create_restaurant, get_menu, list_restaurants
+from api.services.catalogue.schema import get_context, schema
 
-router = APIRouter(prefix="/catalogue", tags=["Catalogue"])
-router.add_api_route("/restaurants", list_restaurants, methods=["GET"])
-router.add_api_route("/restaurants", create_restaurant, methods=["POST"], status_code=201)
-router.add_api_route("/restaurants/{restaurant_id}/menus", create_menu, methods=["POST"], status_code=201)
-router.add_api_route("/restaurants/{restaurant_id}/menu", get_menu, methods=["GET"])
-router.add_api_route("/menus/{menu_id}/items", add_item, methods=["POST"], status_code=201)
-router.add_api_route("/items/{item_id}/check", check_item, methods=["GET"])
+router = GraphQLRouter(
+    schema,
+    path="/catalogue/graphql",
+    graphql_ide=None,
+    context_getter=get_context,
+    tags=["Catalogue"],
+)

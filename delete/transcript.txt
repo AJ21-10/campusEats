@@ -1,0 +1,221 @@
+
+===== D1 - Create an order (201 + Location) and GET the Location =====
+$ curl -i -X POST 'http://127.0.0.1:8000/orders' -H 'Content-Type: application/json' -H 'Accept: application/json' -H 'Authorization: Bearer <redacted>' -H 'Idempotency-Key: <generated>' -d '{"user_id":14,"items":[{"item_id":1,"qty":1}],"address":"Campus pickup","location_id":1,"payment_method_id":1,"fulfilment_type":"PICKUP"}'
+
+HTTP/1.1 201 Created
+date: Thu, 08 Oct 2026 17:33:46 GMT
+server: uvicorn
+content-length: 168
+content-type: application/json; charset=utf-8
+location: /orders/15
+etag: "ac084bd918cc829b4e72f7617a6323f87055c10f06516d261f5dadf32f3e9c12"
+x-ratelimit-limit: 60
+x-ratelimit-remaining: 59
+x-content-type-options: nosniff
+
+{"order_id":15,"user_id":14,"restaurant_id":1,"location_id":null,"fulfilment_type":"PICKUP","scheduled_at":null,"status":"PENDING_PAYMENT","subtotal":95.0,"total":95.0}
+$ curl -i 'http://127.0.0.1:8000/orders/15' -H 'Authorization: Bearer <redacted>'
+
+HTTP/1.1 200 OK
+date: Thu, 08 Oct 2026 17:33:46 GMT
+server: uvicorn
+content-length: 168
+content-type: application/json; charset=utf-8
+etag: "ac084bd918cc829b4e72f7617a6323f87055c10f06516d261f5dadf32f3e9c12"
+cache-control: private, max-age=0, must-revalidate
+x-ratelimit-limit: 60
+x-ratelimit-remaining: 58
+x-content-type-options: nosniff
+
+{"order_id":15,"user_id":14,"restaurant_id":1,"location_id":null,"fulfilment_type":"PICKUP","scheduled_at":null,"status":"PENDING_PAYMENT","subtotal":95.0,"total":95.0}
+===== D2 - Empty cart =====
+$ curl -i -X POST 'http://127.0.0.1:8000/orders' -H 'Content-Type: application/json' -H 'Authorization: Bearer <redacted>' -H 'Idempotency-Key: transcript-empty-cart' -d '{"user_id":14,"items":[],"address":"Campus pickup","location_id":1,"payment_method_id":1,"fulfilment_type":"PICKUP"}'
+
+HTTP/1.1 422 Unprocessable Entity
+date: Thu, 08 Oct 2026 17:33:46 GMT
+server: uvicorn
+content-length: 198
+content-type: application/problem+json; charset=utf-8
+x-ratelimit-limit: 60
+x-ratelimit-remaining: 57
+x-content-type-options: nosniff
+
+{"type":"empty-cart","title":"Empty cart","status":422,"detail":"An order must contain at least one item","instance":"/orders","errors":[{"field":"items","reason":"must contain at least one item"}]}
+===== D2 - Quantity zero =====
+$ curl -i -X POST 'http://127.0.0.1:8000/orders' -H 'Content-Type: application/json' -H 'Authorization: Bearer <redacted>' -H 'Idempotency-Key: transcript-qty-zero' -d '{"user_id":14,"items":[{"item_id":1,"qty":0}],"address":"Campus pickup","location_id":1,"payment_method_id":1,"fulfilment_type":"PICKUP"}'
+
+HTTP/1.1 422 Unprocessable Entity
+date: Thu, 08 Oct 2026 17:33:46 GMT
+server: uvicorn
+content-length: 198
+content-type: application/problem+json; charset=utf-8
+x-ratelimit-limit: 60
+x-ratelimit-remaining: 56
+x-content-type-options: nosniff
+
+{"type":"validation-failed","title":"Validation failed","status":422,"detail":"Request validation failed","instance":"/orders","errors":[{"field":"items[0].qty","reason":"must be an integer >= 1"}]}
+===== D2 - Negative quantity =====
+$ curl -i -X POST 'http://127.0.0.1:8000/orders' -H 'Content-Type: application/json' -H 'Authorization: Bearer <redacted>' -H 'Idempotency-Key: transcript-qty-negative' -d '{"user_id":14,"items":[{"item_id":1,"qty":-1}],"address":"Campus pickup","location_id":1,"payment_method_id":1,"fulfilment_type":"PICKUP"}'
+
+HTTP/1.1 422 Unprocessable Entity
+date: Thu, 08 Oct 2026 17:33:47 GMT
+server: uvicorn
+content-length: 198
+content-type: application/problem+json; charset=utf-8
+x-ratelimit-limit: 60
+x-ratelimit-remaining: 55
+x-content-type-options: nosniff
+
+{"type":"validation-failed","title":"Validation failed","status":422,"detail":"Request validation failed","instance":"/orders","errors":[{"field":"items[0].qty","reason":"must be an integer >= 1"}]}
+===== D2 - Two invalid fields in one request =====
+$ curl -i -X POST 'http://127.0.0.1:8000/orders' -H 'Content-Type: application/json' -H 'Authorization: Bearer <redacted>' -H 'Idempotency-Key: transcript-two-errors' -d '{"user_id":14,"items":[{"item_id":1,"qty":0}],"payment_method_id":1,"fulfilment_type":"PICKUP"}'
+
+HTTP/1.1 422 Unprocessable Entity
+date: Thu, 08 Oct 2026 17:33:47 GMT
+server: uvicorn
+content-length: 257
+content-type: application/problem+json; charset=utf-8
+x-ratelimit-limit: 60
+x-ratelimit-remaining: 54
+x-content-type-options: nosniff
+
+{"type":"validation-failed","title":"Validation failed","status":422,"detail":"Request validation failed","instance":"/orders","errors":[{"field":"items[0].qty","reason":"must be an integer >= 1"},{"field":"address","reason":"must be a non-empty address"}]}
+===== D2 - Unknown order ID =====
+$ curl -i 'http://127.0.0.1:8000/orders/2147483647' -H 'Authorization: Bearer <redacted>'
+
+HTTP/1.1 404 Not Found
+date: Thu, 08 Oct 2026 17:33:47 GMT
+server: uvicorn
+content-length: 143
+content-type: application/problem+json; charset=utf-8
+x-ratelimit-limit: 60
+x-ratelimit-remaining: 53
+x-content-type-options: nosniff
+
+{"type":"order-not-found","title":"Order not found","status":404,"detail":"The requested order does not exist","instance":"/orders/2147483647"}
+===== D2 - Illegal order transition =====
+$ curl -i -X PATCH 'http://127.0.0.1:8000/orders/15?user_id=14' -H 'Content-Type: application/json' -H 'Authorization: Bearer <redacted>' -d '{"status":"COMPLETED"}'
+
+HTTP/1.1 409 Conflict
+date: Thu, 08 Oct 2026 17:33:47 GMT
+server: uvicorn
+content-length: 178
+content-type: application/problem+json; charset=utf-8
+x-ratelimit-limit: 60
+x-ratelimit-remaining: 52
+x-content-type-options: nosniff
+
+{"type":"illegal-transition","title":"Illegal order transition","status":409,"detail":"An order in status PENDING_PAYMENT cannot transition to COMPLETED","instance":"/orders/15"}
+===== D2 - Unavailable item =====
+Note: payment decline is not reachable in the existing Orders workflow; see NOTES.md.
+$ curl -i -X POST 'http://127.0.0.1:8000/orders' -H 'Content-Type: application/json' -H 'Authorization: Bearer <redacted>' -H 'Idempotency-Key: transcript-unavailable-item' -d '{"user_id":14,"items":[{"item_id":999999999,"qty":1}],"address":"Campus pickup","location_id":1,"payment_method_id":1,"fulfilment_type":"PICKUP"}'
+
+HTTP/1.1 409 Conflict
+date: Thu, 08 Oct 2026 17:33:47 GMT
+server: uvicorn
+content-length: 209
+content-type: application/problem+json; charset=utf-8
+x-ratelimit-limit: 60
+x-ratelimit-remaining: 51
+x-content-type-options: nosniff
+
+{"type":"item-unavailable","title":"Item unavailable","status":409,"detail":"One or more requested items are unavailable","instance":"/orders","errors":[{"field":"items[0].item_id","reason":"is unavailable"}]}
+===== D2 - Rate limit (429 + Retry-After) =====
+$ for _ in $(seq 1 60); do curl -sS -o /dev/null -H 'X-Client-ID: assignment6-transcript-rate-limit' 'http://127.0.0.1:8000/health'; done; curl -i -H 'X-Client-ID: assignment6-transcript-rate-limit' 'http://127.0.0.1:8000/health'
+
+HTTP/1.1 429 Too Many Requests
+date: Thu, 08 Oct 2026 17:33:48 GMT
+server: uvicorn
+content-length: 118
+content-type: application/problem+json; charset=utf-8
+retry-after: 59
+x-ratelimit-limit: 60
+x-ratelimit-remaining: 0
+x-content-type-options: nosniff
+
+{"type":"rate-limited","title":"Rate limit exceeded","status":429,"detail":"Rate limit exceeded","instance":"/health"}
+===== D2 - Malformed JSON =====
+$ curl -i -X POST 'http://127.0.0.1:8000/orders' -H 'Content-Type: application/json' -H 'Authorization: Bearer <redacted>' --data-binary '{"user_id":'
+
+HTTP/1.1 400 Bad Request
+date: Thu, 08 Oct 2026 17:33:48 GMT
+server: uvicorn
+content-length: 200
+content-type: application/problem+json; charset=utf-8
+x-ratelimit-limit: 60
+x-ratelimit-remaining: 50
+x-content-type-options: nosniff
+
+{"type":"validation-failed","title":"Malformed JSON","status":400,"detail":"The request body must contain valid JSON","instance":"/orders","errors":[{"field":"request","reason":"must be valid JSON"}]}
+===== D2 - Unsupported Accept (406) =====
+$ curl -i 'http://127.0.0.1:8000/orders/15' -H 'Authorization: Bearer <redacted>' -H 'Accept: text/html'
+
+HTTP/1.1 406 Not Acceptable
+date: Thu, 08 Oct 2026 17:33:48 GMT
+server: uvicorn
+content-length: 143
+content-type: application/problem+json; charset=utf-8
+x-ratelimit-limit: 60
+x-ratelimit-remaining: 49
+x-content-type-options: nosniff
+
+{"type":"not-acceptable","title":"Not acceptable","status":406,"detail":"Only supported representations are available","instance":"/orders/15"}
+===== D3 - The same order as JSON =====
+$ curl -i 'http://127.0.0.1:8000/orders/15' -H 'Authorization: Bearer <redacted>' -H 'Accept: application/json'
+
+HTTP/1.1 200 OK
+date: Thu, 08 Oct 2026 17:33:48 GMT
+server: uvicorn
+content-length: 168
+content-type: application/json; charset=utf-8
+etag: "ac084bd918cc829b4e72f7617a6323f87055c10f06516d261f5dadf32f3e9c12"
+cache-control: private, max-age=0, must-revalidate
+x-ratelimit-limit: 60
+x-ratelimit-remaining: 48
+x-content-type-options: nosniff
+
+{"order_id":15,"user_id":14,"restaurant_id":1,"location_id":null,"fulfilment_type":"PICKUP","scheduled_at":null,"status":"PENDING_PAYMENT","subtotal":95.0,"total":95.0}
+===== D3 - The same order as XML =====
+$ curl -i 'http://127.0.0.1:8000/orders/15' -H 'Authorization: Bearer <redacted>' -H 'Accept: application/xml'
+
+HTTP/1.1 200 OK
+date: Thu, 08 Oct 2026 17:33:48 GMT
+server: uvicorn
+etag: "ac084bd918cc829b4e72f7617a6323f87055c10f06516d261f5dadf32f3e9c12"
+cache-control: private, max-age=0, must-revalidate
+content-length: 241
+content-type: application/xml; charset=utf-8
+x-ratelimit-limit: 60
+x-ratelimit-remaining: 47
+x-content-type-options: nosniff
+
+<order><order_id>15</order_id><user_id>14</user_id><restaurant_id>1</restaurant_id><location_id /><fulfilment_type>PICKUP</fulfilment_type><scheduled_at /><status>PENDING_PAYMENT</status><subtotal>95.00</subtotal><total>95.00</total></order>
+===== D4 - Idempotency replay =====
+$ curl -i -X POST 'http://127.0.0.1:8000/orders' -H 'Content-Type: application/json' -H 'Accept: application/json' -H 'Authorization: Bearer <redacted>' -H 'Idempotency-Key: <same generated key>' -d '{"user_id":14,"items":[{"item_id":1,"qty":1}],"address":"Campus pickup","location_id":1,"payment_method_id":1,"fulfilment_type":"PICKUP"}'
+
+HTTP/1.1 201 Created
+date: Thu, 08 Oct 2026 17:33:48 GMT
+server: uvicorn
+content-length: 168
+content-type: application/json; charset=utf-8
+location: /orders/15
+etag: "ac084bd918cc829b4e72f7617a6323f87055c10f06516d261f5dadf32f3e9c12"
+x-ratelimit-limit: 60
+x-ratelimit-remaining: 46
+x-content-type-options: nosniff
+
+{"order_id":15,"user_id":14,"restaurant_id":1,"location_id":null,"fulfilment_type":"PICKUP","scheduled_at":null,"status":"PENDING_PAYMENT","subtotal":95.0,"total":95.0}
+===== D4 - Dependency timeout/unavailability maps to 503 =====
+$ curl -i 'http://127.0.0.1:8001/health/database'
+
+HTTP/1.1 503 Service Unavailable
+date: Thu, 08 Oct 2026 17:33:49 GMT
+server: uvicorn
+content-length: 160
+content-type: application/problem+json; charset=utf-8
+retry-after: 3
+x-ratelimit-limit: 60
+x-ratelimit-remaining: 58
+x-content-type-options: nosniff
+
+{"type":"service-unavailable","title":"Service unavailable","status":503,"detail":"A required service is temporarily unavailable","instance":"/health/database"}

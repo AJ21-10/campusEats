@@ -13,7 +13,7 @@ class ProfileInput(BaseModel):
 class RegisterInput(ProfileInput):
     email: str
     password: str = Field(min_length=8)
-    role: Literal["STUDENT", "VENDOR", "DELIVERY_STAFF", "ADMIN"] = "STUDENT"
+    role: Literal["STUDENT", "VENDOR", "DELIVERY_STAFF"] = "STUDENT"
 
 
 class LoginInput(BaseModel):

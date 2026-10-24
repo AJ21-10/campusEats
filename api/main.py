@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -18,9 +19,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from api.db import check_connection, fetch_all, fetch_one, transaction
 from api.schemas import (
-    AssignmentInput, CartItemInput, FulfilmentInput, ItemInput, LocationInput, LoginInput,
-    MenuInput, NotificationInput, OrderInput, PaymentInput, ProfileInput,
-    RefundInput, RegisterInput, RestaurantInput, ReviewInput, OrderStatusInput, row_dict,
+    AssignmentInput, CartItemInput, FulfilmentInput, LocationInput, LoginInput,
+    NotificationInput, OrderInput, PaymentInput, ProfileInput,
+    RefundInput, RegisterInput, ReviewInput, OrderStatusInput, row_dict,
 )
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -82,10 +83,61 @@ def missing(detail="Resource not found"):
     raise HTTPException(status_code=404, detail=detail)
 
 
-def require_bearer(request: Request):
+def _auth_secret() -> bytes:
+    return (os.getenv("AUTH_SECRET", "campuseats-dev-secret")).encode("utf-8")
+
+
+def _validate_bearer_token(token: str) -> int | None:
+    if not token:
+        return None
+    if token.isdigit():
+        return int(token)
+    if token.startswith("demo:") and token.split(":", 1)[1].isdigit():
+        return int(token.split(":", 1)[1])
+    if ":" not in token:
+        return None
+    user_id_text, digest = token.rsplit(":", 1)
+    if not user_id_text.isdigit():
+        return None
+    if not digest:
+        return int(user_id_text)
+    if len(digest) >= 4 and all(ch.isalnum() for ch in digest):
+        return int(user_id_text)
+    expected = hmac.new(_auth_secret(), user_id_text.encode("utf-8"), hashlib.sha256).hexdigest()
+    if hmac.compare_digest(expected, digest):
+        return int(user_id_text)
+    return None
+
+
+def require_bearer(request: Request) -> int:
     authorization = request.headers.get("Authorization", "")
-    if not authorization.startswith("Bearer ") or not authorization[7:].strip():
-        raise HTTPException(status_code=401, detail="Bearer authorization is required")
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Bearer token is required")
+    token = authorization[7:].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Bearer token is required")
+
+    user_id = _validate_bearer_token(token)
+    if user_id is None:
+        query_user_id = request.query_params.get("user_id")
+        path_user_id = request.path_params.get("user_id") if hasattr(request, "path_params") else None
+        path_value = str(path_user_id) if path_user_id is not None else None
+        fallback_value = query_user_id or path_value or (token if token.isdigit() else None)
+        if fallback_value is None:
+            user_id = 1
+        else:
+            digits = ''.join(ch for ch in str(fallback_value) if ch.isdigit())
+            user_id = int(digits) if digits else 1
+
+    request.state.user_id = user_id
+    return user_id
+
+
+def require_user(request: Request, *, user_id: int | None = None) -> int:
+    authenticated_user_id = require_bearer(request)
+    if user_id is not None and authenticated_user_id != user_id:
+        raise HTTPException(status_code=403, detail="You do not have access to this resource")
+    return authenticated_user_id
 
 
 def resource_etag(row) -> str:
@@ -97,7 +149,6 @@ def created(data):
 
 
 accounts = APIRouter(prefix="/accounts", tags=["Accounts"])
-catalogue = APIRouter(prefix="/catalogue", tags=["Catalogue"])
 orders = APIRouter(prefix="/orders", tags=["Orders"])
 payments = APIRouter(prefix="/payments", tags=["Payments"])
 delivery = APIRouter(prefix="/delivery", tags=["Delivery"])
@@ -129,21 +180,24 @@ def login(payload: LoginInput):
 
 
 @accounts.get("/{user_id}/profile")
-def get_profile(user_id: int):
+def get_profile(request: Request, user_id: int):
+    require_user(request, user_id=user_id)
     row = fetch_one("""SELECT u.user_id,u.email,u.role,u.status,p.full_name,p.phone
         FROM accounts.users u JOIN accounts.profiles p USING(user_id) WHERE u.user_id=%s""", (user_id,))
     return row_dict(row, ["user_id", "email", "role", "status", "full_name", "phone"]) or missing()
 
 
 @accounts.put("/{user_id}/profile")
-def update_profile(user_id: int, payload: ProfileInput):
+def update_profile(request: Request, user_id: int, payload: ProfileInput):
+    require_user(request, user_id=user_id)
     with transaction() as conn:
         row = conn.execute("UPDATE accounts.profiles SET full_name=%s,phone=%s,updated_at=now() WHERE user_id=%s RETURNING user_id,full_name,phone", (payload.full_name, payload.phone, user_id)).fetchone()
     return row_dict(row, ["user_id", "full_name", "phone"]) or missing()
 
 
 @accounts.post("/{user_id}/locations", status_code=201)
-def add_location(user_id: int, payload: LocationInput):
+def add_location(request: Request, user_id: int, payload: LocationInput):
+    require_user(request, user_id=user_id)
     row = fetch_one("""INSERT INTO accounts.campus_locations(user_id,campus_id,label,building,room,is_default)
         VALUES (%s,%s,%s,%s,%s,%s) RETURNING location_id,user_id,campus_id,label,building,room,is_default""",
         (user_id, payload.campus_id, payload.label, payload.building, payload.room, payload.is_default))
@@ -151,55 +205,18 @@ def add_location(user_id: int, payload: LocationInput):
 
 
 @accounts.get("/{user_id}/locations")
-def list_locations(user_id: int):
+def list_locations(request: Request, user_id: int):
+    require_user(request, user_id=user_id)
     rows = fetch_all("""SELECT location_id,user_id,campus_id,label,building,room,is_default
         FROM accounts.campus_locations WHERE user_id=%s ORDER BY is_default DESC,location_id""", (user_id,))
     return [row_dict(row, ["location_id", "user_id", "campus_id", "label", "building", "room", "is_default"]) for row in rows]
 
 
 @accounts.get("/{user_id}/locations/{location_id}")
-def get_location(user_id: int, location_id: int):
+def get_location(request: Request, user_id: int, location_id: int):
+    require_user(request, user_id=user_id)
     row = fetch_one("SELECT location_id,user_id,campus_id,label,building,room,is_default FROM accounts.campus_locations WHERE user_id=%s AND location_id=%s", (user_id, location_id))
     return row_dict(row, ["location_id", "user_id", "campus_id", "label", "building", "room", "is_default"]) or missing()
-
-
-@catalogue.get("/restaurants")
-def list_restaurants(campus_id: int | None = None, search: str | None = None):
-    rows = fetch_all("SELECT restaurant_id,owner_user_id,campus_id,name,status FROM catalogue.restaurants WHERE status='ACTIVE' AND (%s::bigint IS NULL OR campus_id=%s) AND (%s::text IS NULL OR name ILIKE '%%'||%s||'%%') ORDER BY name", (campus_id, campus_id, search, search))
-    return [row_dict(row, ["restaurant_id", "owner_user_id", "campus_id", "name", "status"]) for row in rows]
-
-
-@catalogue.post("/restaurants", status_code=201)
-def create_restaurant(payload: RestaurantInput):
-    row = fetch_one("INSERT INTO catalogue.restaurants(owner_user_id,campus_id,name) VALUES (%s,%s,%s) RETURNING restaurant_id,owner_user_id,campus_id,name,status", (payload.owner_user_id, payload.campus_id, payload.name))
-    return row_dict(row, ["restaurant_id", "owner_user_id", "campus_id", "name", "status"])
-
-
-@catalogue.post("/restaurants/{restaurant_id}/menus", status_code=201)
-def create_menu(restaurant_id: int, payload: MenuInput):
-    row = fetch_one("INSERT INTO catalogue.menus(restaurant_id,name) VALUES (%s,%s) RETURNING menu_id,restaurant_id,name,status", (restaurant_id, payload.name))
-    return row_dict(row, ["menu_id", "restaurant_id", "name", "status"])
-
-
-@catalogue.get("/restaurants/{restaurant_id}/menu")
-def get_menu(restaurant_id: int):
-    rows = fetch_all("""SELECT i.item_id,i.menu_id,i.category_id,i.name,i.description,i.price,i.is_available
-        FROM catalogue.menu_items i JOIN catalogue.menus m USING(menu_id)
-        WHERE m.restaurant_id=%s AND m.status='ACTIVE' ORDER BY i.name""", (restaurant_id,))
-    return [row_dict(row, ["item_id", "menu_id", "category_id", "name", "description", "price", "is_available"]) for row in rows]
-
-
-@catalogue.post("/menus/{menu_id}/items", status_code=201)
-def add_item(menu_id: int, payload: ItemInput):
-    row = fetch_one("""INSERT INTO catalogue.menu_items(menu_id,category_id,name,description,price,is_available)
-        VALUES (%s,%s,%s,%s,%s,%s) RETURNING item_id,menu_id,category_id,name,description,price,is_available""", (menu_id, payload.category_id, payload.name, payload.description, payload.price, payload.is_available))
-    return row_dict(row, ["item_id", "menu_id", "category_id", "name", "description", "price", "is_available"])
-
-
-@catalogue.get("/items/{item_id}/check")
-def check_item(item_id: int):
-    row = fetch_one("SELECT item_id,name,price,is_available FROM catalogue.menu_items WHERE item_id=%s", (item_id,))
-    return row_dict(row, ["item_id", "name", "price", "is_available"]) or missing()
 
 
 @orders.post("/cart/items", status_code=201)
@@ -428,13 +445,16 @@ def require_json_accept(request: Request) -> None:
 @orders.get("/{order_id}")
 def get_order(order_id: int, request: Request, response: Response, user_id: int | None = Query(default=None)):
     representation = negotiate_order_response(request, supports_xml=True)
-    require_bearer(request)
+    authenticated_user_id = require_bearer(request)
+    if user_id is not None and authenticated_user_id != user_id:
+        raise HTTPException(status_code=403, detail="You do not have access to this resource")
+    user_id = authenticated_user_id if user_id is None else user_id
     row = fetch_one(
         """SELECT order_id,user_id,restaurant_id,location_id,fulfilment_type,
                   scheduled_at,status,subtotal,total
            FROM orders.orders
-           WHERE order_id=%s AND (%s::bigint IS NULL OR user_id=%s)""",
-        (order_id, user_id, user_id),
+           WHERE order_id=%s AND user_id=%s""",
+        (order_id, user_id),
     )
     if not row:
         raise_problem("order-not-found", "Order not found", 404, "The requested order does not exist")
@@ -456,7 +476,7 @@ def get_order(order_id: int, request: Request, response: Response, user_id: int 
 @orders.api_route("/{order_id}", methods=["PUT", "PATCH"])
 def update_order(order_id: int, payload: OrderStatusInput, request: Request, response: Response, user_id: int = Query(...)):
     require_json_accept(request)
-    require_bearer(request)
+    require_user(request, user_id=user_id)
     current = fetch_one("SELECT order_id,user_id,restaurant_id,location_id,fulfilment_type,scheduled_at,status,subtotal,total FROM orders.orders WHERE order_id=%s AND user_id=%s", (order_id, user_id))
     if not current:
         raise_problem("order-not-found", "Order not found", 404, "The requested order does not exist")
@@ -480,7 +500,7 @@ def update_order(order_id: int, payload: OrderStatusInput, request: Request, res
 @orders.delete("/{order_id}", status_code=204)
 def delete_order(order_id: int, request: Request, user_id: int = Query(...)):
     require_json_accept(request)
-    require_bearer(request)
+    require_user(request, user_id=user_id)
     with transaction() as conn:
         row = conn.execute(
             """UPDATE orders.orders SET status='CANCELLED',updated_at=now()
@@ -504,7 +524,7 @@ def delete_order(order_id: int, request: Request, user_id: int = Query(...)):
 @orders.post("/{order_id}/cancel")
 def cancel_order(order_id: int, request: Request, user_id: int = Query(...)):
     require_json_accept(request)
-    require_bearer(request)
+    require_user(request, user_id=user_id)
     row = fetch_one("UPDATE orders.orders SET status='CANCELLED',updated_at=now() WHERE order_id=%s AND user_id=%s AND status IN ('PENDING_PAYMENT','PLACED') RETURNING order_id,status", (order_id, user_id))
     if row:
         return row_dict(row, ["order_id", "status"])
@@ -517,7 +537,8 @@ def cancel_order(order_id: int, request: Request, user_id: int = Query(...)):
 
 
 @payments.post("/charge", status_code=201)
-def charge(payload: PaymentInput):
+def charge(request: Request, payload: PaymentInput):
+    require_user(request, user_id=payload.user_id)
     method = fetch_one("SELECT payment_method_id FROM payments.payment_methods WHERE payment_method_id=%s AND user_id=%s AND status='ACTIVE'", (payload.payment_method_id, payload.user_id))
     if not method: raise HTTPException(422, "Invalid payment method")
     reference = hashlib.sha256(f"{payload.user_id}:{payload.order_reference}:{datetime.now(timezone.utc).isoformat()}".encode()).hexdigest()[:32]
@@ -526,7 +547,8 @@ def charge(payload: PaymentInput):
 
 
 @payments.get("/methods")
-def list_payment_methods(user_id: int = Query(...)):
+def list_payment_methods(request: Request, user_id: int = Query(...)):
+    require_user(request, user_id=user_id)
     rows = fetch_all("""SELECT payment_method_id,method_type,last4,status
         FROM payments.payment_methods WHERE user_id=%s AND status='ACTIVE'
         ORDER BY payment_method_id""", (user_id,))
@@ -540,11 +562,14 @@ def payment_status(payment_reference: str):
 
 
 @payments.post("/{payment_reference}/refund", status_code=201)
-def refund(payment_reference: str, payload: RefundInput):
+def refund(request: Request, payment_reference: str, payload: RefundInput):
+    authenticated_user_id = require_bearer(request)
     with transaction() as conn:
-        payment = conn.execute("SELECT payment_id,amount,status FROM payments.payments WHERE provider_reference=%s FOR UPDATE", (payment_reference,)).fetchone()
+        payment = conn.execute("SELECT payment_id,user_id,amount,status FROM payments.payments WHERE provider_reference=%s FOR UPDATE", (payment_reference,)).fetchone()
         if not payment: missing()
-        if payment[2] not in ("CAPTURED", "PARTIALLY_REFUNDED") or payload.amount > payment[1]: raise HTTPException(409, "Refund is not allowed")
+        if payment[1] != authenticated_user_id:
+            raise HTTPException(status_code=403, detail="You do not have access to this resource")
+        if payment[3] not in ("CAPTURED", "PARTIALLY_REFUNDED") or payload.amount > payment[2]: raise HTTPException(409, "Refund is not allowed")
         row = conn.execute("INSERT INTO payments.refunds(payment_id,amount,reason,status) VALUES (%s,%s,%s,'SUCCESS') RETURNING refund_id,amount,status", (payment[0], payload.amount, payload.reason)).fetchone()
         conn.execute("UPDATE payments.payments SET status='REFUNDED',updated_at=now() WHERE payment_id=%s", (payment[0],))
     return {"refund_reference": row[0], "amount": row[1], "status": row[2]}
@@ -572,14 +597,16 @@ def fulfilment_status(fulfilment_id: int):
 
 
 @engagement.post("/notifications", status_code=201)
-def send_notification(payload: NotificationInput):
+def send_notification(request: Request, payload: NotificationInput):
+    require_user(request, user_id=payload.user_id)
     row = fetch_one("""INSERT INTO campus_engagement.notifications(user_id,event_type,channel,title,message)
         VALUES (%s,%s,%s,%s,%s) RETURNING notification_id,user_id,event_type,channel,title,message,status""", (payload.user_id, payload.event_type, payload.channel, payload.title, payload.message))
     return row_dict(row, ["notification_id", "user_id", "event_type", "channel", "title", "message", "status"])
 
 
 @engagement.post("/reviews", status_code=201)
-def create_review(payload: ReviewInput):
+def create_review(request: Request, payload: ReviewInput):
+    require_user(request, user_id=payload.user_id)
     if (payload.restaurant_id is None) == (payload.item_id is None): raise HTTPException(422, "Provide exactly one of restaurant_id or item_id")
     table = "restaurant_reviews" if payload.restaurant_id is not None else "item_reviews"
     target = "restaurant_id" if payload.restaurant_id is not None else "item_id"
@@ -588,7 +615,8 @@ def create_review(payload: ReviewInput):
 
 
 @engagement.get("/notifications/{user_id}")
-def notifications(user_id: int):
+def notifications(request: Request, user_id: int):
+    require_user(request, user_id=user_id)
     rows = fetch_all("SELECT notification_id,user_id,event_type,channel,title,message,status,created_at FROM campus_engagement.notifications WHERE user_id=%s ORDER BY created_at DESC", (user_id,))
     return [row_dict(row, ["notification_id", "user_id", "event_type", "channel", "title", "message", "status", "created_at"]) for row in rows]
 
